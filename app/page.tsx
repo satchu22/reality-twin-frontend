@@ -1,5 +1,18 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
+
 export default function RealityTwinFrontPage() {
+  const [overview, setOverview] = useState<any>(null);
+
+  useEffect(() => {
+    fetch("http://localhost:8000/overview")
+      .then((res) => res.json())
+      .then((data) => setOverview(data))
+      .catch((err) => console.error("Overview fetch error:", err));
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white">
       <section className="relative overflow-hidden">
@@ -45,14 +58,19 @@ export default function RealityTwinFrontPage() {
                 compare outcomes, and choose the best move before disruptions hit the real world.
               </p>
               <div className="mt-8 flex flex-wrap gap-4">
-               <Link href="/simulate">
-                <button className="rounded-2xl bg-cyan-400 px-6 py-3 text-sm font-semibold text-slate-950">
-                  Try Simulation
-                </button>
-               </Link>
+                <Link href="/simulate">
+                  <button className="rounded-2xl bg-cyan-400 px-6 py-3 text-sm font-semibold text-slate-950">
+                    Try Simulation
+                  </button>
+                </Link>
                 <button className="rounded-2xl border border-white/15 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
                   See platform overview
                 </button>
+                <Link href="/map">
+                  <button className="rounded-2xl border border-white/15 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
+                    Open Map
+                  </button>
+                </Link>
               </div>
               <div className="mt-10 grid max-w-xl grid-cols-3 gap-4 text-sm">
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -87,19 +105,27 @@ export default function RealityTwinFrontPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-2xl bg-white/5 p-4">
                       <p className="text-xs text-slate-400">Active routes</p>
-                      <p className="mt-2 text-2xl font-semibold text-white">1,248</p>
+                      <p className="mt-2 text-2xl font-semibold text-white">
+                        {overview ? overview.active_routes : "..."}
+                      </p>
                     </div>
                     <div className="rounded-2xl bg-white/5 p-4">
                       <p className="text-xs text-slate-400">Risk alerts</p>
-                      <p className="mt-2 text-2xl font-semibold text-amber-300">17</p>
+                      <p className="mt-2 text-2xl font-semibold text-amber-300">
+                        {overview ? overview.risk_alerts : "..."}
+                      </p>
                     </div>
                     <div className="rounded-2xl bg-white/5 p-4">
                       <p className="text-xs text-slate-400">Cost exposure</p>
-                      <p className="mt-2 text-2xl font-semibold text-white">$2.4M</p>
+                      <p className="mt-2 text-2xl font-semibold text-white">
+                        {overview ? `$${overview.cost_exposure}` : "..."}
+                      </p>
                     </div>
                     <div className="rounded-2xl bg-white/5 p-4">
                       <p className="text-xs text-slate-400">Best action saved</p>
-                      <p className="mt-2 text-2xl font-semibold text-cyan-300">$410K</p>
+                      <p className="mt-2 text-sm font-semibold text-cyan-300">
+                        {overview ? overview.best_action : "..."}
+                      </p>
                     </div>
                   </div>
 
@@ -111,11 +137,15 @@ export default function RealityTwinFrontPage() {
                     <div className="mt-4 space-y-3">
                       <div className="rounded-xl bg-slate-950/60 p-3">
                         <p className="text-xs text-slate-400">Predicted impact</p>
-                        <p className="mt-1 text-sm text-white">38 shipments delayed, +$142K cost, 3 warehouse bottlenecks.</p>
+                        <p className="mt-1 text-sm text-white">
+                          Latest shipping activity and operational exposure are now pulled from your live backend.
+                        </p>
                       </div>
                       <div className="rounded-xl bg-emerald-400/10 p-3">
                         <p className="text-xs text-emerald-300">Recommended action</p>
-                        <p className="mt-1 text-sm text-white">Reroute 21 shipments via Los Angeles to reduce delay by 41%.</p>
+                        <p className="mt-1 text-sm text-white">
+                          {overview ? overview.best_action : "..."}
+                        </p>
                       </div>
                     </div>
                   </div>
