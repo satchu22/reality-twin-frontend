@@ -2,12 +2,20 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { buildApiUrl } from "@/lib/api";
+
+type Overview = {
+  active_routes: number;
+  risk_alerts: number;
+  cost_exposure: number;
+  best_action: string;
+};
 
 export default function RealityTwinFrontPage() {
-  const [overview, setOverview] = useState<any>(null);
+  const [overview, setOverview] = useState<Overview | null>(null);
 
   useEffect(() => {
-    fetch("http://localhost:8000/overview")
+    fetch(buildApiUrl("/overview"))
       .then((res) => res.json())
       .then((data) => setOverview(data))
       .catch((err) => console.error("Overview fetch error:", err));
@@ -58,17 +66,24 @@ export default function RealityTwinFrontPage() {
                 compare outcomes, and choose the best move before disruptions hit the real world.
               </p>
               <div className="mt-8 flex flex-wrap gap-4">
-                <Link href="/simulate">
-                  <button className="rounded-2xl bg-cyan-400 px-6 py-3 text-sm font-semibold text-slate-950">
-                    Try Simulation
+                <Link href="/dashboard">
+                  <button className="rounded-2xl border border-white/15 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
+                    Dashboard
                   </button>
                 </Link>
-                <button className="rounded-2xl border border-white/15 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
-                  See platform overview
-                </button>
                 <Link href="/map">
                   <button className="rounded-2xl border border-white/15 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
                     Open Map
+                  </button>
+                </Link>
+                <Link href="/simulate">
+                  <button className="rounded-2xl bg-cyan-400 px-6 py-3 text-sm font-semibold text-slate-950">
+                    Simulate Route
+                  </button>
+                </Link>
+                <Link href="/upload">
+                  <button className="rounded-2xl border border-white/15 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
+                    Upload CSV / Destination
                   </button>
                 </Link>
               </div>

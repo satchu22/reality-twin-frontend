@@ -1,18 +1,689 @@
 "use client";
-import { useEffect, useState } from "react";
+
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-mapboxgl.accessToken =
-  "pk.eyJ1IjoicGFibG8tMjIxOTkiLCJhIjoiY21uNGQ5OGtnMWx6YTJycHl0MG9rZnZoYiJ9.9ok9u8FQp5FalPtlKyJrng";
+import { type DecisionOption } from "@/components/DecisionCards";
+import { useRealtime } from "@/components/RealtimeProvider";
+import RoutePanel, { type SelectedRoute } from "@/components/RoutePanel";
+import { fetchEvents, type LiveEvent } from "@/lib/events";
+import { getMapboxToken } from "@/lib/mapbox";
+import { fetchRoutes, type RouteRecord } from "@/lib/routes";
+import {
+  approveSimulationDecision,
+  simulateRoute,
+  type SimulationResponse,
+  type SimulationOption,
+} from "@/lib/simulate";
+
+const mapboxToken = getMapboxToken();
+
+if (mapboxToken) {
+  mapboxgl.accessToken = mapboxToken;
+}
+
+type RouteStatus = SelectedRoute["status"];
+
+type RouteFeature = GeoJSON.Feature<GeoJSON.LineString> & {
+  properties: {
+    route_id: number;
+    route_name: string;
+    distance: number | null;
+    color: string;
+    status: RouteStatus;
+  };
+};
+
+type RouteFeatureCollection = GeoJSON.FeatureCollection<GeoJSON.LineString> & {
+  features: RouteFeature[];
+};
+
+type DecisionOverlay = {
+  layerId: string;
+  sourceId: string;
+  option: SimulationOption;
+  color: string;
+  baseWidth: number;
+  geometry: [number, number][];
+};
+
+type StoredLocation = {
+  name: string;
+  latitude: number;
+  longitude: number;
+};
+
+const EMPTY_FEATURE_COLLECTION: RouteFeatureCollection = {
+  type: "FeatureCollection",
+  features: [],
+};
+
+const DECISION_ROUTE_STYLES = [
+  { color: "#22c55e", width: 6, label: "Best Route" },
+  { color: "#facc15", width: 4, label: "Alternative" },
+  { color: "#ef4444", width: 3, label: "High Risk" },
+] as const;
+
+function parseRouteDistance(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function parseQueryCoordinate(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function eventColor(source: LiveEvent["source"]) {
+  return {
+    weather: "#3b82f6",
+    traffic: "#f97316",
+    satellite: "#ef4444",
+    global_event: "#a855f7",
+  }[source];
+}
+
+function buildLineStringFeature(coordinates: [number, number][]) {
+  return {
+    type: "FeatureCollection" as const,
+    features: [
+      {
+        type: "Feature" as const,
+        properties: {},
+        geometry: {
+          type: "LineString" as const,
+          coordinates,
+        },
+      },
+    ],
+  };
+}
+
+async function getRouteGeometry(
+  start: [number, number],
+  end: [number, number],
+): Promise<[number, number][]> {
+  if (!mapboxToken) {
+    return [start, end];
+  }
+
+  try {
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${start[0]},${start[1]};${end[0]},${end[1]}?geometries=geojson&overview=full&steps=true&access_token=${mapboxToken}`;
+    const response = await fetch(url);
+    const result = await response.json();
+    return result.routes?.[0]?.geometry?.coordinates ?? [start, end];
+  } catch (error) {
+    console.error("Route geometry error:", error);
+    return [start, end];
+  }
+}
+
+async function getDecisionRouteGeometries(
+  start: [number, number],
+  end: [number, number],
+): Promise<[number, number][][]> {
+  if (!mapboxToken) {
+    return [[start, end]];
+  }
+
+  try {
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${start[0]},${start[1]};${end[0]},${end[1]}?alternatives=true&geometries=geojson&overview=full&steps=true&access_token=${mapboxToken}`;
+    const response = await fetch(url);
+    const result = await response.json();
+    const routes = result.routes?.map(
+      (route: { geometry?: { coordinates?: [number, number][] } }) =>
+        route.geometry?.coordinates,
+    );
+    const validRoutes = routes?.filter(
+      (route: [number, number][] | undefined): route is [number, number][] =>
+        Array.isArray(route) && route.length >= 2,
+    );
+
+    return validRoutes?.length ? validRoutes : [[start, end]];
+  } catch (error) {
+    console.error("Decision route geometry error:", error);
+    return [[start, end]];
+  }
+}
+
+function getRerouteCoordinates(
+  coordinates: [number, number][],
+  magnitude = 0.35,
+  latMagnitude = 0.2,
+) {
+  if (coordinates.length < 2) {
+    return coordinates;
+  }
+
+  return coordinates.map(([lng, lat], index) => {
+    const direction = index % 2 === 0 ? 1 : -1;
+    return [
+      lng + magnitude * direction,
+      lat + latMagnitude * direction,
+    ] as [number, number];
+  });
+}
+
+function buildRouteAlternativeGeometry(
+  baseCoordinates: [number, number][],
+  variantIndex: number,
+) {
+  if (variantIndex === 0) {
+    return baseCoordinates;
+  }
+
+  if (variantIndex === 1) {
+    return getRerouteCoordinates(baseCoordinates, 0.18, 0.12);
+  }
+
+  return getRerouteCoordinates(baseCoordinates, 0.32, 0.18);
+}
+
+async function buildRouteFeatureCollection(
+  batchId?: number | null,
+): Promise<RouteFeatureCollection> {
+  const routes = await fetchRoutes(batchId);
+  if (routes.length === 0) {
+    return EMPTY_FEATURE_COLLECTION;
+  }
+
+  const features: RouteFeature[] = await Promise.all(
+    routes.map(async (route: RouteRecord) => {
+      const routeName = route.route_name ?? route.route ?? `Route ${route.route_id}`;
+      const distance = parseRouteDistance(route.distance);
+      const coordinates = await getRouteGeometry(route.source, route.dest);
+
+      return {
+        type: "Feature",
+        properties: {
+          route_id: route.route_id,
+          route_name: routeName,
+          distance,
+          color: "#22d3ee",
+          status: "normal",
+        },
+        geometry: {
+          type: "LineString",
+          coordinates,
+        },
+      };
+    }),
+  );
+
+  return {
+    type: "FeatureCollection",
+    features,
+  };
+}
 
 export default function MapPage() {
-  const [selectedRoute, setSelectedRoute] = useState<any>(null);
+  const searchParams = useSearchParams();
+  const { isPollingFallback, latestRouteUpdate, latestSimulationUpdate, pollTick } =
+    useRealtime();
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const eventMarkersRef = useRef<mapboxgl.Marker[]>([]);
+  const routesDataRef = useRef<RouteFeatureCollection>(EMPTY_FEATURE_COLLECTION);
+  const manualMarkersRef = useRef<mapboxgl.Marker[]>([]);
+  const decisionPopupRef = useRef<mapboxgl.Popup | null>(null);
+  const decisionOverlaysRef = useRef<DecisionOverlay[]>([]);
 
-  const normalize = (str: string) =>
-    str?.replace(/→|->/g, "").trim().toLowerCase();
+  const [selectedRoute, setSelectedRoute] = useState<SelectedRoute | null>(null);
+  const [isRoutePanelOpen, setIsRoutePanelOpen] = useState(false);
+  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
+  const [routesLoading, setRoutesLoading] = useState(true);
+  const [routesError, setRoutesError] = useState<string | null>(null);
+  const [simulationLoading, setSimulationLoading] = useState(false);
+  const [approvalLoading, setApprovalLoading] = useState(false);
+  const [simulationResult, setSimulationResult] =
+    useState<SimulationResponse | null>(null);
+  const [simulationError, setSimulationError] = useState<string | null>(null);
+  const [confirmationMessage, setConfirmationMessage] = useState<string | null>(null);
+  const [approvedOptionName, setApprovedOptionName] = useState<string | null>(null);
+  const [storedOrigin, setStoredOrigin] = useState<StoredLocation | null>(null);
+  const [storedDestination, setStoredDestination] = useState<StoredLocation | null>(null);
+
+  const queryOriginLat = parseQueryCoordinate(searchParams.get("origin_lat"));
+  const queryOriginLng = parseQueryCoordinate(searchParams.get("origin_lng"));
+  const queryDestLat = parseQueryCoordinate(searchParams.get("dest_lat"));
+  const queryDestLng = parseQueryCoordinate(searchParams.get("dest_lng"));
+  const queryOriginName = searchParams.get("origin_name");
+  const queryDestName = searchParams.get("dest_name");
+  const originLat = queryOriginLat ?? storedOrigin?.latitude ?? null;
+  const originLng = queryOriginLng ?? storedOrigin?.longitude ?? null;
+  const destLat = queryDestLat ?? storedDestination?.latitude ?? null;
+  const destLng = queryDestLng ?? storedDestination?.longitude ?? null;
+  const originName = queryOriginName ?? storedOrigin?.name ?? null;
+  const destName = queryDestName ?? storedDestination?.name ?? null;
+  const hasManualRoute =
+    originLat !== null &&
+    originLng !== null &&
+    destLat !== null &&
+    destLng !== null;
+  const detectedEvents = simulationResult
+    ? Array.from(
+        new Map(
+          simulationResult.options
+            .flatMap((option) => option.live_events_used)
+            .map((event) => [event.id, event]),
+        ).values(),
+      )
+    : [];
 
   useEffect(() => {
+    const savedOrigin = sessionStorage.getItem("origin");
+    const savedDestination = sessionStorage.getItem("destination");
+    const savedSimulation = sessionStorage.getItem("routeSimulation");
+    const savedOptions = sessionStorage.getItem("routeOptions");
+
+    if (savedOrigin) {
+      setStoredOrigin(JSON.parse(savedOrigin) as StoredLocation);
+    }
+
+    if (savedDestination) {
+      setStoredDestination(JSON.parse(savedDestination) as StoredLocation);
+    }
+
+    if (savedSimulation) {
+      const parsedSimulation = JSON.parse(savedSimulation) as SimulationResponse;
+      setSimulationResult(parsedSimulation);
+      console.log("Routes loaded in map", parsedSimulation.options);
+      return;
+    }
+
+    if (savedOptions && savedOrigin && savedDestination) {
+      const parsedOptions = JSON.parse(savedOptions) as SimulationOption[];
+      const parsedOrigin = JSON.parse(savedOrigin) as StoredLocation;
+      const parsedDestination = JSON.parse(savedDestination) as StoredLocation;
+      const bestOption = [...parsedOptions].sort(
+        (left, right) => (left.score ?? Number.POSITIVE_INFINITY) - (right.score ?? Number.POSITIVE_INFINITY),
+      )[0];
+
+      setSimulationResult({
+        route: `${parsedOrigin.name} → ${parsedDestination.name}`,
+        total_time: bestOption?.total_time ?? 0,
+        total_cost: bestOption?.total_cost ?? 0,
+        risk: bestOption?.risk ?? "medium",
+        explanation: bestOption?.explanation ?? [],
+        options: parsedOptions,
+        best_option: bestOption?.name ?? "",
+      });
+      console.log("Routes loaded in map", parsedOptions);
+    }
+  }, []);
+
+  function clearRerouteLayer() {
+    const rerouteSource = mapRef.current?.getSource("reroute-route") as
+      | mapboxgl.GeoJSONSource
+      | undefined;
+    rerouteSource?.setData(EMPTY_FEATURE_COLLECTION);
+  }
+
+  function resetSelectionVisuals() {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    if (map.getLayer("routes-layer")) {
+      map.setPaintProperty("routes-layer", "line-opacity", 0.9);
+    }
+
+    if (map.getLayer("routes-layer-highlight")) {
+      map.setFilter("routes-layer-highlight", ["==", ["get", "route_name"], ""]);
+    }
+  }
+
+  function updateRoutesSource(featureCollection: RouteFeatureCollection) {
+    routesDataRef.current = featureCollection;
+    const source = mapRef.current?.getSource("routes") as
+      | mapboxgl.GeoJSONSource
+      | undefined;
+    source?.setData(featureCollection);
+  }
+
+  function clearEventMarkers() {
+    for (const marker of eventMarkersRef.current) {
+      marker.remove();
+    }
+    eventMarkersRef.current = [];
+  }
+
+  function clearManualMarkers() {
+    for (const marker of manualMarkersRef.current) {
+      marker.remove();
+    }
+    manualMarkersRef.current = [];
+  }
+
+  function removeDecisionRouteOverlays() {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    decisionPopupRef.current?.remove();
+    decisionPopupRef.current = null;
+
+    for (const overlay of decisionOverlaysRef.current) {
+      if (map.getLayer(overlay.layerId)) {
+        map.removeLayer(overlay.layerId);
+      }
+      if (map.getSource(overlay.sourceId)) {
+        map.removeSource(overlay.sourceId);
+      }
+    }
+
+    decisionOverlaysRef.current = [];
+  }
+
+  function updateEventsSource(events: LiveEvent[]) {
+    setLiveEvents(events);
+
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const source = map.getSource("live-events") as mapboxgl.GeoJSONSource | undefined;
+    source?.setData({
+      type: "FeatureCollection",
+      features: events.map((event) => ({
+        type: "Feature" as const,
+        properties: {
+          id: event.id,
+          source: event.source,
+          severity: event.severity,
+          description: event.description,
+        },
+        geometry: {
+          type: "Point" as const,
+          coordinates: [event.lng, event.lat],
+        },
+      })),
+    });
+
+    clearEventMarkers();
+    eventMarkersRef.current = events.map((event) => {
+      const element = document.createElement("div");
+      element.className =
+        "h-4 w-4 rounded-full border-2 border-white shadow-lg ring-4 ring-white/10";
+      element.style.backgroundColor = eventColor(event.source);
+      element.title = `${event.source}: ${event.description}`;
+
+      return new mapboxgl.Marker({ element })
+        .setLngLat([event.lng, event.lat])
+        .addTo(map);
+    });
+  }
+
+  function getSimulationEndpoints(): [[number, number], [number, number]] | null {
+    if (hasManualRoute) {
+      return [
+        [originLng as number, originLat as number],
+        [destLng as number, destLat as number],
+      ];
+    }
+
+    if (!selectedRoute) {
+      return null;
+    }
+
+    const feature = routesDataRef.current.features.find(
+      (candidate) => candidate.properties.route_id === selectedRoute.routeId,
+    );
+    const coordinates = feature?.geometry.coordinates;
+
+    if (!coordinates || coordinates.length < 2) {
+      return null;
+    }
+
+    return [
+      coordinates[0] as [number, number],
+      coordinates[coordinates.length - 1] as [number, number],
+    ];
+  }
+
+  function applyDecisionRouteSelection(optionName: string | null) {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    for (const overlay of decisionOverlaysRef.current) {
+      if (map.getLayer(overlay.layerId)) {
+        map.setPaintProperty(
+          overlay.layerId,
+          "line-width",
+          optionName === overlay.option.name ? overlay.baseWidth + 2 : overlay.baseWidth,
+        );
+        map.setPaintProperty(
+          overlay.layerId,
+          "line-opacity",
+          optionName && optionName !== overlay.option.name ? 0.45 : 0.82,
+        );
+      }
+    }
+  }
+
+  const drawDecisionRouteOverlays = useEffectEvent(async (options: SimulationOption[]) => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    console.log("Drawing overlays", options);
+
+    removeDecisionRouteOverlays();
+
+    if (options.length === 0) {
+      return;
+    }
+
+    const endpoints = getSimulationEndpoints();
+    if (!endpoints) {
+      return;
+    }
+
+    const [start, end] = endpoints;
+    const alternativeGeometries = await getDecisionRouteGeometries(start, end);
+    const sortedOptions = [...options].sort((left, right) => {
+      const leftScore = typeof left.score === "number" ? left.score : Number.POSITIVE_INFINITY;
+      const rightScore = typeof right.score === "number" ? right.score : Number.POSITIVE_INFINITY;
+      return leftScore - rightScore;
+    });
+
+    const overlays: DecisionOverlay[] = [];
+    const bounds = new mapboxgl.LngLatBounds();
+
+    for (const [index, option] of sortedOptions.entries()) {
+      const style =
+        DECISION_ROUTE_STYLES[index] ?? DECISION_ROUTE_STYLES[DECISION_ROUTE_STYLES.length - 1];
+      const sourceId = `decision-route-${index}`;
+      const layerId = `${sourceId}-line`;
+      const geometryFromApi = alternativeGeometries[index];
+      const fallbackGeometry = buildRouteAlternativeGeometry(
+        alternativeGeometries[0] ?? [start, end],
+        index,
+      );
+      const geometry =
+        option.geometry && option.geometry.length >= 2
+          ? option.geometry
+          : geometryFromApi && geometryFromApi.length >= 2
+            ? geometryFromApi
+            : fallbackGeometry;
+
+      map.addSource(sourceId, {
+        type: "geojson",
+        data: buildLineStringFeature(geometry),
+      });
+
+      map.addLayer({
+        id: layerId,
+        type: "line",
+        source: sourceId,
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": style.color,
+          "line-width": style.width,
+          "line-opacity": 0.82,
+        },
+      });
+
+      map.on("mouseenter", layerId, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+
+      map.on("mouseleave", layerId, () => {
+        map.getCanvas().style.cursor = "";
+      });
+
+      map.on("click", layerId, (event) => {
+        applyDecisionRouteSelection(option.name);
+
+        const popupCoordinate =
+          event.lngLat ??
+          new mapboxgl.LngLat(geometry[Math.floor(geometry.length / 2)][0], geometry[Math.floor(geometry.length / 2)][1]);
+
+        decisionPopupRef.current?.remove();
+        decisionPopupRef.current = new mapboxgl.Popup({ offset: 18 })
+          .setLngLat(popupCoordinate)
+          .setHTML(
+            `
+              <div style="min-width: 220px; color: #0f172a;">
+                <div style="font-weight: 700; margin-bottom: 8px;">${option.route_type}</div>
+                <div>Total Time: ${option.total_time} days</div>
+                <div>Total Cost: $${option.total_cost}</div>
+                <div>Risk: ${option.risk}</div>
+                <div style="margin-top: 8px; font-size: 12px; color: #334155;">
+                  ${option.explanation[0] ?? "No explanation available."}
+                </div>
+              </div>
+            `,
+          )
+          .addTo(map);
+      });
+
+      for (const coordinate of geometry) {
+        bounds.extend(coordinate);
+      }
+
+      overlays.push({
+        layerId,
+        sourceId,
+        option,
+        color: style.color,
+        baseWidth: style.width,
+        geometry,
+      });
+    }
+
+    decisionOverlaysRef.current = overlays;
+    applyDecisionRouteSelection(sortedOptions[0]?.name ?? null);
+
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 80, maxZoom: 8 });
+    }
+  });
+
+  const loadRoutes = useEffectEvent(async () => {
+    setRoutesLoading(true);
+    setRoutesError(null);
+
+    try {
+      const selectedBatch = window.localStorage.getItem("selected_batch");
+      const parsedBatchId = selectedBatch ? Number(selectedBatch) : null;
+      const featureCollection = await buildRouteFeatureCollection(
+        Number.isFinite(parsedBatchId) ? parsedBatchId : null,
+      );
+      updateRoutesSource(featureCollection);
+    } catch (routeError) {
+      setRoutesError(
+        routeError instanceof Error ? routeError.message : "Failed to load routes",
+      );
+      updateRoutesSource(EMPTY_FEATURE_COLLECTION);
+    } finally {
+      setRoutesLoading(false);
+    }
+  });
+
+  const loadEvents = useEffectEvent(async () => {
+    try {
+      const events = await fetchEvents();
+      updateEventsSource(events);
+    } catch (eventError) {
+      console.error("Failed to load live events", eventError);
+    }
+  });
+
+  const loadManualRouteOverlay = useEffectEvent(async () => {
+    const map = mapRef.current;
+    if (!map || !hasManualRoute) {
+      return;
+    }
+
+    const origin: [number, number] = [originLng as number, originLat as number];
+    const destination: [number, number] = [destLng as number, destLat as number];
+    const coordinates = await getRouteGeometry(origin, destination);
+    const routeSource = map.getSource("manual-route") as mapboxgl.GeoJSONSource | undefined;
+
+    routeSource?.setData({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: {
+            route_name: `${originName ?? "Origin"}-${destName ?? "Destination"}`,
+          },
+          geometry: {
+            type: "LineString",
+            coordinates,
+          },
+        },
+      ],
+    });
+
+    clearManualMarkers();
+
+    manualMarkersRef.current = [
+      new mapboxgl.Marker({ color: "#22c55e" })
+        .setLngLat(origin)
+        .setPopup(new mapboxgl.Popup({ offset: 20 }).setText(originName ?? "Origin"))
+        .addTo(map),
+      new mapboxgl.Marker({ color: "#ef4444" })
+        .setLngLat(destination)
+        .setPopup(new mapboxgl.Popup({ offset: 20 }).setText(destName ?? "Destination"))
+        .addTo(map),
+    ];
+
+    if (!simulationResult?.options?.length) {
+      map.fitBounds([origin, destination], { padding: 80, maxZoom: 8 });
+    }
+  });
+
+  useEffect(() => {
+    if (!mapboxToken) {
+      console.warn("Map disabled. Please configure Mapbox token.");
+      setRoutesLoading(false);
+      return;
+    }
+
     const map = new mapboxgl.Map({
       container: "map",
       style: "mapbox://styles/mapbox/dark-v11",
@@ -20,159 +691,12 @@ export default function MapPage() {
       zoom: 3,
     });
 
-    map.on("load", async () => {
+    mapRef.current = map;
 
-      // 🔥 MANUAL ROUTE SUPPORT (ONLY ADDITION)
-      const manual = localStorage.getItem("manual_route");
-
-      if (manual) {
-        const parsed = JSON.parse(manual);
-
-        const getRoute = async (start: number[], end: number[]) => {
-          try {
-            const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${start[0]},${start[1]};${end[0]},${end[1]}?geometries=geojson&overview=full&steps=true&access_token=${mapboxgl.accessToken}`;
-
-            const res = await fetch(url);
-            const data = await res.json();
-
-            if (!data.routes || data.routes.length === 0) {
-              return [start, end];
-            }
-
-            return data.routes[0].geometry.coordinates;
-
-          } catch (err) {
-            console.error("Route error:", err);
-            return [start, end];
-          }
-        };
-
-        const coords = await getRoute(parsed.source, parsed.dest);
-
-        map.addSource("manual-route", {
-          type: "geojson",
-          data: {
-            type: "Feature",
-            geometry: {
-              type: "LineString",
-              coordinates: coords,
-            },
-          },
-        });
-
-        map.addLayer({
-          id: "manual-layer",
-          type: "line",
-          source: "manual-route",
-          paint: {
-            "line-color": "#00ff00",
-            "line-width": 6,
-          },
-        });
-
-        new mapboxgl.Marker({ color: "#00ff00" })
-          .setLngLat(parsed.source)
-          .addTo(map);
-
-        new mapboxgl.Marker({ color: "#00ff00" })
-          .setLngLat(parsed.dest)
-          .addTo(map);
-
-        map.flyTo({
-          center: parsed.source,
-          zoom: 5,
-        });
-
-        localStorage.removeItem("manual_route");
-
-        return; // 🔥 STOP original logic
-      }
-
-      let highRisk: string[] = [];
-      let mediumRisk: string[] = [];
-      let bestOption: string | null = null;
-
-      try {
-        const simulation = localStorage.getItem("simulation");
-        if (simulation && simulation !== "undefined") {
-          const parsed = JSON.parse(simulation);
-          highRisk = parsed?.impact?.high_risk || [];
-          mediumRisk = parsed?.impact?.medium_risk || [];
-          bestOption = parsed?.best_option?.name || null;
-        }
-      } catch (e) {
-        console.error(e);
-      }
-
-      const selectedBatch = localStorage.getItem("selected_batch");
-
-      const routesRes = await fetch(
-        selectedBatch
-          ? `http://localhost:8000/batch-data?batch_id=${selectedBatch}`
-          : "http://localhost:8000/routes"
-      );
-
-      const routes = await routesRes.json();
-
-      const getRoute = async (start: number[], end: number[]) => {
-        try {
-          const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${start[0]},${start[1]};${end[0]},${end[1]}?geometries=geojson&overview=full&steps=true&access_token=${mapboxgl.accessToken}`;
-
-          const res = await fetch(url);
-          const data = await res.json();
-
-          if (!data.routes || data.routes.length === 0) {
-            return [start, end];
-          }
-
-          return data.routes[0].geometry.coordinates;
-
-        } catch (err) {
-          console.error("Route error:", err);
-          return [start, end];
-        }
-      };
-
-      const features = [];
-
-      for (const r of routes) {
-        const name = normalize(r.route_name || r.route);
-
-        const isHigh = highRisk.map(normalize).includes(name);
-        const isMedium = mediumRisk.map(normalize).includes(name);
-        const isBest = bestOption
-          ? normalize(bestOption).includes(name)
-          : false;
-
-        let color = "#00ffff";
-
-        if (isBest) color = "#00ff00";
-        else if (isHigh) color = "#ff0000";
-        else if (isMedium) color = "#ffff00";
-
-        const routeCoords = await getRoute(r.source, r.dest);
-
-        features.push({
-          type: "Feature",
-          properties: {
-            route_name: r.route_name || r.route,
-            color: color,
-          },
-          geometry: {
-            type: "LineString",
-            coordinates: routeCoords,
-          },
-        });
-      }
-
-      const geojson = {
-        type: "FeatureCollection",
-        features,
-      };
-
+    map.on("load", () => {
       map.addSource("routes", {
         type: "geojson",
-        data: geojson,
+        data: EMPTY_FEATURE_COLLECTION,
       });
 
       map.addLayer({
@@ -191,11 +715,80 @@ export default function MapPage() {
         type: "line",
         source: "routes",
         paint: {
-          "line-color": "#ffff00",
+          "line-color": "#facc15",
           "line-width": 10,
           "line-opacity": 1,
         },
         filter: ["==", ["get", "route_name"], ""],
+      });
+
+      map.addSource("reroute-route", {
+        type: "geojson",
+        data: EMPTY_FEATURE_COLLECTION,
+      });
+
+      map.addLayer({
+        id: "reroute-route-layer",
+        type: "line",
+        source: "reroute-route",
+        paint: {
+          "line-color": "#f59e0b",
+          "line-width": 5,
+          "line-dasharray": [2, 2],
+          "line-opacity": 0.95,
+        },
+      });
+
+      map.addSource("live-events", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      map.addSource("manual-route", {
+        type: "geojson",
+        data: EMPTY_FEATURE_COLLECTION,
+      });
+
+      map.addLayer({
+        id: "live-events-layer",
+        type: "circle",
+        source: "live-events",
+        paint: {
+          "circle-radius": [
+            "match",
+            ["get", "severity"],
+            "high",
+            30,
+            "medium",
+            22,
+            16,
+          ],
+          "circle-color": [
+            "match",
+            ["get", "source"],
+            "weather",
+            "#3b82f6",
+            "traffic",
+            "#f97316",
+            "satellite",
+            "#ef4444",
+            "#a855f7",
+          ],
+          "circle-opacity": 0.18,
+          "circle-stroke-width": 1.5,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
+      map.addLayer({
+        id: "manual-route-layer",
+        type: "line",
+        source: "manual-route",
+        paint: {
+          "line-color": "#3b82f6",
+          "line-width": 6,
+          "line-opacity": 0.95,
+        },
       });
 
       map.on("mouseenter", "routes-layer", () => {
@@ -206,91 +799,355 @@ export default function MapPage() {
         map.getCanvas().style.cursor = "";
       });
 
-      map.on("click", "routes-layer", async (e) => {
-        const feature = e.features?.[0];
-        if (!feature) return;
-
-        const routeName = feature.properties?.route_name;
-        if (!routeName) return;
+      map.on("click", "routes-layer", (event) => {
+        const feature = event.features?.[0];
+        const routeName = feature?.properties?.route_name;
+        if (!feature || !routeName) {
+          return;
+        }
 
         map.setPaintProperty("routes-layer", "line-opacity", 0.3);
-
         map.setFilter("routes-layer-highlight", [
           "==",
           ["get", "route_name"],
           routeName,
         ]);
 
-        const res = await fetch(
-          `http://localhost:8000/route-details?route_name=${encodeURIComponent(routeName)}`
-        );
+        setSimulationResult(null);
+        setSimulationError(null);
+        setConfirmationMessage(null);
+        setApprovedOptionName(null);
+        removeDecisionRouteOverlays();
+        clearRerouteLayer();
 
-        const data = await res.json();
-        setSelectedRoute(data);
+        setSelectedRoute({
+          routeId: Number(feature.properties?.route_id),
+          name: routeName,
+          distance: parseRouteDistance(feature.properties?.distance),
+          status: (feature.properties?.status as RouteStatus) ?? "normal",
+        });
+        setIsRoutePanelOpen(true);
       });
 
-      routes.forEach((r: any) => {
-        const name = normalize(r.route_name || r.route);
-
-        const isHigh = highRisk.map(normalize).includes(name);
-        const isMedium = mediumRisk.map(normalize).includes(name);
-        const isBest = bestOption
-          ? normalize(bestOption).includes(name)
-          : false;
-
-        let markerColor = "#00ffff";
-
-        if (isBest) markerColor = "#00ff00";
-        else if (isHigh) markerColor = "#ff0000";
-        else if (isMedium) markerColor = "#ffff00";
-
-        new mapboxgl.Marker({ color: markerColor })
-          .setLngLat(r.source)
-          .addTo(map);
-
-        new mapboxgl.Marker({ color: markerColor })
-          .setLngLat(r.dest)
-          .addTo(map);
-      });
+      void loadRoutes();
+      void loadEvents();
+      void loadManualRouteOverlay();
     });
 
-    return () => map.remove();
+    return () => {
+      clearEventMarkers();
+      clearManualMarkers();
+      removeDecisionRouteOverlays();
+      map.remove();
+      mapRef.current = null;
+    };
   }, []);
 
+  useEffect(() => {
+    if (!mapboxToken || !mapRef.current || !hasManualRoute) {
+      return;
+    }
+
+    void loadManualRouteOverlay();
+  }, [
+    hasManualRoute,
+    originLat,
+    originLng,
+    destLat,
+    destLng,
+    originName,
+    destName,
+    simulationResult,
+  ]);
+
+  useEffect(() => {
+    if (latestRouteUpdate?.status === "events_refreshed") {
+      void loadEvents();
+      return;
+    }
+
+    if (!latestRouteUpdate?.route_id) {
+      return;
+    }
+
+    const routeId = Number(latestRouteUpdate.route_id);
+    updateRoutesSource({
+      ...routesDataRef.current,
+      features: routesDataRef.current.features.map((feature) =>
+        feature.properties.route_id !== routeId
+          ? feature
+          : {
+              ...feature,
+              properties: {
+                ...feature.properties,
+                color: latestRouteUpdate.status === "high risk" ? "#ef4444" : "#22d3ee",
+                status: latestRouteUpdate.status === "high risk" ? "high risk" : "normal",
+              },
+            },
+      ),
+    });
+  }, [latestRouteUpdate]);
+
+  useEffect(() => {
+    if (!latestSimulationUpdate?.route_id) {
+      return;
+    }
+
+    const routeId = Number(latestSimulationUpdate.route_id);
+    const isSelectedRoute = selectedRoute?.routeId === routeId;
+
+    if (isSelectedRoute && latestSimulationUpdate.options?.length) {
+      setSimulationResult({
+        route: latestSimulationUpdate.route ?? selectedRoute?.name ?? "",
+        total_time: latestSimulationUpdate.options[0]?.total_time ?? selectedRoute?.distance ?? 0,
+        total_cost: latestSimulationUpdate.options[0]?.total_cost ?? 0,
+        risk: latestSimulationUpdate.risk ?? "medium",
+        explanation: latestSimulationUpdate.explanation ?? [],
+        options: latestSimulationUpdate.options,
+        best_option: latestSimulationUpdate.best_option ?? "",
+      });
+      setApprovedOptionName(null);
+      setSimulationError(null);
+    }
+
+    if (isSelectedRoute && latestSimulationUpdate.approved_option) {
+      setApprovedOptionName(latestSimulationUpdate.approved_option);
+      setConfirmationMessage(
+        latestSimulationUpdate.message ?? "Simulation decision approved successfully",
+      );
+    }
+  }, [latestSimulationUpdate, selectedRoute]);
+
+  useEffect(() => {
+    if (!isPollingFallback || pollTick === 0) {
+      return;
+    }
+
+    void loadRoutes();
+    void loadEvents();
+  }, [isPollingFallback, pollTick]);
+
+  useEffect(() => {
+    if (!mapRef.current) {
+      return;
+    }
+
+    if (!simulationResult?.options?.length) {
+      removeDecisionRouteOverlays();
+      return;
+    }
+
+    void drawDecisionRouteOverlays(simulationResult.options);
+  }, [simulationResult]);
+
+  async function handleSimulateDisruption() {
+    if (!selectedRoute || simulationLoading) {
+      return;
+    }
+
+    if (selectedRoute.distance === null || selectedRoute.distance <= 0) {
+      setSimulationError("Route distance is unavailable for simulation.");
+      return;
+    }
+
+    setSimulationLoading(true);
+    setSimulationError(null);
+    setConfirmationMessage(null);
+    setApprovedOptionName(null);
+
+    try {
+      const result = await simulateRoute({
+        route_id: selectedRoute.routeId,
+        distance_km: selectedRoute.distance,
+        disruption_type: "weather",
+      });
+
+      const updatedFeatures = routesDataRef.current.features.map((feature) => {
+        if (feature.properties.route_id !== selectedRoute.routeId) {
+          return feature;
+        }
+
+        return {
+          ...feature,
+          properties: {
+            ...feature.properties,
+            color: "#ef4444",
+            status: "high risk" as const,
+          },
+        };
+      });
+
+      updateRoutesSource({
+        ...routesDataRef.current,
+        features: updatedFeatures,
+      });
+
+      mapRef.current?.setPaintProperty("routes-layer-highlight", "line-color", "#ef4444");
+      setSelectedRoute((currentRoute) =>
+        currentRoute
+          ? {
+              ...currentRoute,
+              status: "high risk",
+            }
+          : currentRoute,
+      );
+      setSimulationResult(result);
+    } catch (error) {
+      console.error("Map simulation request failed", error);
+      setSimulationResult(null);
+      setSimulationError(
+        error instanceof Error ? error.message : "Simulation failed. Please try again.",
+      );
+    } finally {
+      setSimulationLoading(false);
+    }
+  }
+
+  async function handleApproveDecision(option: DecisionOption) {
+    if (!selectedRoute || approvalLoading) {
+      return;
+    }
+
+    setApprovalLoading(true);
+    setSimulationError(null);
+    setConfirmationMessage(null);
+
+    try {
+      const approvalResult = await approveSimulationDecision(selectedRoute.routeId, option.name);
+      setApprovedOptionName(option.name);
+      setConfirmationMessage(approvalResult.message);
+      applyDecisionRouteSelection(option.name);
+    } catch (error) {
+      setSimulationError(
+        error instanceof Error ? error.message : "Decision approval failed",
+      );
+    } finally {
+      setApprovalLoading(false);
+    }
+  }
+
+  function handleClosePanel() {
+    setIsRoutePanelOpen(false);
+    setSelectedRoute(null);
+    setSimulationResult(null);
+    setSimulationError(null);
+    setConfirmationMessage(null);
+    setApprovedOptionName(null);
+    removeDecisionRouteOverlays();
+    resetSelectionVisuals();
+    clearRerouteLayer();
+  }
+
   return (
-    <div className="h-screen w-full relative">
-      <div id="map" className="w-full h-full" />
-
-      {selectedRoute && (
-        <div className="absolute right-0 top-0 w-80 h-full bg-black text-white p-4 shadow-lg">
-          <h2 className="text-xl font-bold mb-2">
-            {selectedRoute.route}
-          </h2>
-
-          <p>⏱ Delay: {selectedRoute.delay} days</p>
-          <p>💰 Cost Impact: ${selectedRoute.cost}</p>
-          <p>⚠️ Risk: {selectedRoute.risk}</p>
-
-          <p className="mt-2 text-sm text-gray-300">
-            {selectedRoute.reason}
-          </p>
-
-          <h3 className="mt-4 font-semibold">Options:</h3>
-          <ul className="mt-2 space-y-1">
-            {Array.isArray(selectedRoute.recommendations) &&
-              selectedRoute.recommendations.map((rec: string, i: number) => (
-                <li key={i}>👉 {rec}</li>
-              ))}
-          </ul>
-
-          <button
-            onClick={() => setSelectedRoute(null)}
-            className="mt-4 bg-red-500 px-3 py-1 rounded"
-          >
-            Close
-          </button>
+    <div className="relative h-screen w-full overflow-hidden bg-slate-950">
+      {mapboxToken ? (
+        <div id="map" className="h-full w-full" />
+      ) : (
+        <div className="flex h-full items-center justify-center px-6">
+          <div className="max-w-xl rounded-3xl border border-amber-400/20 bg-amber-400/10 p-6 text-amber-100">
+            Map disabled. Please configure Mapbox token.
+          </div>
         </div>
       )}
+
+      <div className="pointer-events-none absolute left-6 top-6 z-10 max-w-md space-y-3">
+        <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white shadow-xl backdrop-blur">
+          <p className="text-sm font-semibold text-cyan-300">Route Workflow</p>
+          <p className="mt-1 text-sm text-slate-300">
+            Click a route to open details, run a disruption simulation, and approve the best
+            decision.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
+          <p className="font-semibold text-white">Event Legend</p>
+          <div className="mt-2 space-y-1">
+            <p>Blue = weather</p>
+            <p>Orange = traffic</p>
+            <p>Red = satellite hazard</p>
+            <p>Purple = global event</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
+          <p className="font-semibold text-white">Decision Legend</p>
+          <div className="mt-2 space-y-1">
+            <p>Green = Best Route</p>
+            <p>Yellow = Alternative</p>
+            <p>Red = High Risk</p>
+          </div>
+        </div>
+
+        {routesLoading && (
+          <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
+            Loading routes...
+          </div>
+        )}
+
+        {!routesLoading && routesDataRef.current.features.length === 0 && !routesError && (
+          <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
+            No routes available yet. Use Upload CSV / Destination first.
+          </div>
+        )}
+
+        {routesError && (
+          <div className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-200 shadow-xl backdrop-blur">
+            {routesError}
+          </div>
+        )}
+
+        {liveEvents.length > 0 && (
+          <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
+            <p className="font-semibold text-white">Live Events Used</p>
+            <div className="mt-2 space-y-2">
+              {liveEvents.slice(0, 4).map((event) => (
+                <p key={event.id}>
+                  {event.source} · {event.description}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {!hasManualRoute && (
+          <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
+            No routes generated yet
+          </div>
+        )}
+
+        {hasManualRoute && (
+          <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-100 shadow-xl backdrop-blur">
+            <p className="font-semibold text-white">Manual Route</p>
+            <p className="mt-1">Origin: {originName ?? "Origin"}</p>
+            <p>Destination: {destName ?? "Destination"}</p>
+            <p className="mt-2 text-xs text-cyan-200">
+              Green marker = origin, red marker = destination, blue line = route.
+            </p>
+          </div>
+        )}
+
+        {simulationResult && simulationResult.options.length === 0 && (
+          <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
+            No route options available
+          </div>
+        )}
+      </div>
+
+      <RoutePanel
+        route={selectedRoute}
+        isOpen={isRoutePanelOpen}
+        simulationLoading={simulationLoading}
+        approvalLoading={approvalLoading}
+        simulationError={simulationError}
+        confirmationMessage={confirmationMessage}
+        decisionOptions={simulationResult?.options ?? []}
+        detectedEvents={detectedEvents}
+        bestOptionName={simulationResult?.best_option ?? null}
+        approvedOptionName={approvedOptionName}
+        onClose={handleClosePanel}
+        onSimulate={handleSimulateDisruption}
+        onApprove={handleApproveDecision}
+      />
     </div>
   );
 }

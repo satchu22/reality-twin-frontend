@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "RealityTwin Mobile",
+    "slug": "realitytwin-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#020617"
+      }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "RealityTwin uses your location to center the operations map."
+        }
+      ]
+    ]
+  }
+}

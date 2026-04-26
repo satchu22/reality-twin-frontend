@@ -1,0 +1,6 @@
+airport_id,name,city,country,iata,icao,latitude,longitude,altitude,timezone,dst,tz_database_timezone,type,source
+3484,Los Angeles International Airport,Los Angeles,United States,LAX,KLAX,33.9425,-118.4081,125,-8,A,America/Los_Angeles,airport,OurAirports
+3797,John F Kennedy International Airport,New York,United States,JFK,KJFK,40.6398,-73.7789,13,-5,A,America/New_York,airport,OurAirports
+507,Chicago O'Hare International Airport,Chicago,United States,ORD,KORD,41.9786,-87.9048,672,-6,A,America/Chicago,airport,OurAirports
+3364,London Heathrow Airport,London,United Kingdom,LHR,EGLL,51.4775,-0.4614,83,0,E,Europe/London,airport,OurAirports
+5074,Singapore Changi Airport,Singapore,Singapore,SIN,WSSS,1.3502,103.9940,22,8,N,Asia/Singapore,airport,OurAirports

@@ -1,0 +1,49 @@
+"""Pydantic schemas for simulation endpoints."""
+
+from typing import Literal
+
+from pydantic import AliasChoices, BaseModel, Field, model_validator
+
+from ..services.simulation_service import DISRUPTION_MULTIPLIERS
+
+
+class RouteSimulationRequest(BaseModel):
+    """Request body for route disruption simulation."""
+
+    route_id: int | None = Field(default=None, validation_alias=AliasChoices("route_id", "id"))
+    distance_km: float | None = Field(default=None, gt=0)
+    disruption_type: str = "weather"
+    origin_name: str | None = None
+    origin_latitude: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("origin_latitude", "origin_lat"),
+    )
+    origin_longitude: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("origin_longitude", "origin_lng"),
+    )
+    destination_name: str | None = None
+    destination_latitude: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("destination_latitude", "destination_lat"),
+    )
+    destination_longitude: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("destination_longitude", "destination_lng"),
+    )
+    cargo_type: str | None = None
+    priority: Literal["low", "standard", "high", "critical"] = "standard"
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "RouteSimulationRequest":
+        if self.disruption_type not in DISRUPTION_MULTIPLIERS:
+            allowed_types = ", ".join(DISRUPTION_MULTIPLIERS.keys())
+            raise ValueError(f"disruption_type must be one of: {allowed_types}")
+
+        return self
+
+
+class ApproveSimulationRequest(BaseModel):
+    """Request body for accepting one simulation option."""
+
+    selected_option: str

@@ -1,0 +1,1 @@
+"""Global events integration package."""

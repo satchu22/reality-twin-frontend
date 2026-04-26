@@ -1,20 +1,35 @@
 "use client";
 import { useEffect, useState } from "react";
+import { buildApiUrl } from "@/lib/api";
+
+type Batch = {
+  batch_id: number;
+  total_shipments: number;
+  created_at: string;
+};
+
+type BatchRow = {
+  route: string;
+  cost: number;
+  distance: number;
+  source: [number, number];
+  dest: [number, number];
+};
 
 export default function DashboardPage() {
-  const [batches, setBatches] = useState<any[]>([]);
+  const [batches, setBatches] = useState<Batch[]>([]);
   const [selectedBatch, setSelectedBatch] = useState<number | null>(null);
-  const [data, setData] = useState<any[]>([]);
+  const [data, setData] = useState<BatchRow[]>([]);
 
   useEffect(() => {
-    fetch("http://localhost:8000/batches")
+    fetch(buildApiUrl("/batches"))
       .then(res => res.json())
       .then(setBatches);
   }, []);
 
   const loadBatch = async (batchId: number) => {
     const res = await fetch(
-      `http://localhost:8000/batch-data?batch_id=${batchId}`
+      buildApiUrl(`/batch-data?batch_id=${batchId}`)
     );
     const result = await res.json();
 

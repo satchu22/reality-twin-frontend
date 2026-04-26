@@ -1,16 +1,8 @@
-from fastapi import APIRouter
-from database import SessionLocal
-from models import Shipment
-from services.simulation_service import run_simulation
+"""Compatibility wrapper for the modular simulation router."""
 
-router = APIRouter()
-
-@router.post("/")
-def simulate():
-    db = SessionLocal()
-    shipments = db.query(Shipment).all()
-
-    result = run_simulation(shipments)
-
-    db.close()
-    return result
+try:
+    from app.api.routes.simulate import router
+except ModuleNotFoundError as exc:
+    if exc.name != "app":
+        raise
+    from backend.app.api.routes.simulate import router

@@ -1,16 +1,10 @@
-import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+"""Compatibility exports for the modular database package."""
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-DATABASE_URL = f"sqlite:///{BASE_DIR}/realitytwin.db"
-
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False}
-)
-
-SessionLocal = sessionmaker(bind=engine)
-
-Base = declarative_base()
+try:
+    from app.db.base import Base
+    from app.db.session import SessionLocal, engine
+except ModuleNotFoundError as exc:
+    if exc.name != "app":
+        raise
+    from backend.app.db.base import Base
+    from backend.app.db.session import SessionLocal, engine
