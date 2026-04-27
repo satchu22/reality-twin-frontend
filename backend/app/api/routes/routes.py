@@ -2,7 +2,7 @@
 
 from sqlalchemy.orm import Session
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from ...db.session import get_db
 from ...schemas.event import EventResponse
@@ -35,7 +35,10 @@ async def upload(
     """Upload a shipment CSV and create a new batch."""
 
     contents = await file.read()
-    return upload_shipments_from_csv(db, file_bytes=contents)
+    try:
+        return upload_shipments_from_csv(db, file_bytes=contents)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/manual-route")

@@ -9,8 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes import ai, auth, notifications, realtime, routes, simulate, transactions
 from .core.config import settings
-from .db.base import Base
-from .db.session import SessionLocal, engine
+from .db import SessionLocal, init_db
 from .services.live_data_service import refresh_live_events
 from .services.seed_service import seed_local_data
 from .services.scheduler_service import (
@@ -28,7 +27,7 @@ async def lifespan(app: FastAPI):
     """Start and stop background jobs with the application lifecycle."""
 
     realtime_manager.set_event_loop(asyncio.get_running_loop())
-    Base.metadata.create_all(bind=engine)
+    init_db()
     db = SessionLocal()
     try:
         seed_local_data(db)

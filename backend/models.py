@@ -3,7 +3,9 @@
 try:
     from app.models import (
         Batch,
+        Disruption,
         Notification,
+        Route,
         Shipment,
         Simulation,
         SimulationApproval,
@@ -14,7 +16,9 @@ except ModuleNotFoundError as exc:
         raise
     from backend.app.models import (
         Batch,
+        Disruption,
         Notification,
+        Route,
         Shipment,
         Simulation,
         SimulationApproval,

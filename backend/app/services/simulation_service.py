@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import csv
 import logging
+import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import StringIO
+from typing import Any
 
-from fastapi import HTTPException
 from geopy.distance import geodesic
 from geopy.geocoders import Nominatim
 from sqlalchemy.orm import Session
 
-from ..models.event import ExternalEvent
-from ..models.route import Batch, Shipment
+from ..models.event import Disruption
+from ..models.route import Batch, Route
 from ..models.scenario import Simulation, SimulationApproval
 from .live_data_service import list_live_events as list_live_event_records
 from .location_catalog_service import load_airports, load_ports
@@ -27,69 +28,36 @@ DISRUPTION_MULTIPLIERS = {
     "weather": 1.8,
     "congestion": 1.4,
     "breakdown": 1.6,
+    "customs_delay": 1.9,
+    "strike": 2.1,
 }
 
-OPTION_ADJUSTMENTS = {
-    "direct": {
-        "route_type": "Direct",
-        "delay_multiplier": 1.0,
-        "cost_multiplier": 1.0,
-        "risk_multiplier": 1.05,
+OPTION_PROFILES = [
+    {
+        "label": "A",
+        "name": "reroute",
+        "route_type": "reroute",
+        "delay_multiplier": 0.6,
+        "cost_multiplier": 1.2,
+        "risk_level": "medium",
     },
-    "balanced_reroute": {
-        "route_type": "Balanced Reroute",
+    {
+        "label": "B",
+        "name": "hold",
+        "route_type": "hold",
+        "delay_multiplier": 1.3,
+        "cost_multiplier": 0.9,
+        "risk_level": "low",
+    },
+    {
+        "label": "C",
+        "name": "split",
+        "route_type": "split",
         "delay_multiplier": 0.8,
-        "cost_multiplier": 1.15,
-        "risk_multiplier": 0.8,
+        "cost_multiplier": 1.5,
+        "risk_level": "high",
     },
-    "safety_first": {
-        "route_type": "Safety-First Detour",
-        "delay_multiplier": 1.15,
-        "cost_multiplier": 1.25,
-        "risk_multiplier": 0.65,
-    },
-}
-
-SOURCE_IMPACT_RULES = {
-    "weather": {
-        "delay_multiplier": 0.25,
-        "cost_multiplier": 0.12,
-        "risk_delta": 18,
-        "explanation_prefix": "Weather pressure from",
-    },
-    "traffic": {
-        "delay_multiplier": 0.18,
-        "cost_multiplier": 0.09,
-        "risk_delta": 10,
-        "explanation_prefix": "Traffic congestion near",
-    },
-    "satellite": {
-        "delay_multiplier": 0.4,
-        "cost_multiplier": 0.22,
-        "risk_delta": 28,
-        "explanation_prefix": "Satellite hazard coverage around",
-    },
-    "global_event": {
-        "delay_multiplier": 0.5,
-        "cost_multiplier": 0.3,
-        "risk_delta": 36,
-        "explanation_prefix": "Global disruption context from",
-    },
-}
-
-PRIORITY_MULTIPLIERS = {
-    "low": 0.95,
-    "standard": 1.0,
-    "high": 1.12,
-    "critical": 1.25,
-}
-
-CARGO_RISK_MULTIPLIERS = {
-    "pharma": 1.2,
-    "perishable": 1.15,
-    "electronics": 1.1,
-    "hazmat": 1.35,
-}
+]
 
 
 @dataclass
@@ -105,80 +73,136 @@ class RouteContext:
     priority: str
 
 
-def _fallback_simulation_response(
-    *,
-    route_name: str = "Fallback route plan",
-    reason: str = "Fallback route due to missing data",
-) -> dict[str, object]:
-    options = [
-        {
-            "name": "fallback_air",
-            "route_type": "air",
-            "route": route_name,
-            "delay": 8.0,
-            "cost": 5000.0,
-            "total_time": 8.0,
-            "total_cost": 5000.0,
-            "risk": "medium",
-            "score": 2.4,
-            "explanation": [reason],
-            "event_types": [],
-            "live_events_used": [],
-            "geometry": None,
-            "total_time_hours": 8,
-            "total_cost_usd": 5000,
-            "risk_level": "medium",
-            "explanations": [reason],
-        },
-        {
-            "name": "fallback_sea",
-            "route_type": "sea",
-            "route": route_name,
-            "delay": 120.0,
-            "cost": 2000.0,
-            "total_time": 120.0,
-            "total_cost": 2000.0,
-            "risk": "low",
-            "score": 3.1,
-            "explanation": ["Fallback route"],
-            "event_types": [],
-            "live_events_used": [],
-            "geometry": None,
-            "total_time_hours": 120,
-            "total_cost_usd": 2000,
-            "risk_level": "low",
-            "explanations": ["Fallback route"],
-        },
-        {
-            "name": "fallback_hybrid",
-            "route_type": "hybrid",
-            "route": route_name,
-            "delay": 36.0,
-            "cost": 3000.0,
-            "total_time": 36.0,
-            "total_cost": 3000.0,
-            "risk": "medium",
-            "score": 2.8,
-            "explanation": ["Fallback route"],
-            "event_types": [],
-            "live_events_used": [],
-            "geometry": None,
-            "total_time_hours": 36,
-            "total_cost_usd": 3000,
-            "risk_level": "medium",
-            "explanations": ["Fallback route"],
-        },
-    ]
+def _coerce_positive_number(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and math.isfinite(value) and value > 0:
+        return float(value)
+    return None
 
-    return {
+
+def _coerce_coordinate(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return float(value)
+    return None
+
+
+def _calculate_distance_km_from_coordinates(
+    origin_lat: Any,
+    origin_lng: Any,
+    destination_lat: Any,
+    destination_lng: Any,
+) -> float | None:
+    start_lat = _coerce_coordinate(origin_lat)
+    start_lng = _coerce_coordinate(origin_lng)
+    end_lat = _coerce_coordinate(destination_lat)
+    end_lng = _coerce_coordinate(destination_lng)
+
+    if None in (start_lat, start_lng, end_lat, end_lng):
+        return None
+
+    earth_radius_km = 6371.0
+    start_lat_rad = math.radians(start_lat)
+    end_lat_rad = math.radians(end_lat)
+    delta_lat = math.radians(end_lat - start_lat)
+    delta_lng = math.radians(end_lng - start_lng)
+
+    haversine = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(start_lat_rad)
+        * math.cos(end_lat_rad)
+        * math.sin(delta_lng / 2) ** 2
+    )
+    arc = 2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
+    return round(earth_radius_km * arc, 2)
+
+
+def _derive_route_name(route: Any) -> str:
+    origin_name = getattr(route, "origin_name", None)
+    destination_name = getattr(route, "destination_name", None)
+    if origin_name and destination_name:
+        return f"{origin_name} → {destination_name}"
+
+    route_id = getattr(route, "route_id", None)
+    if route_id is not None:
+        return f"Route {route_id}"
+
+    return "Deterministic route plan"
+
+
+def _derive_distance_km(route: Any) -> float | None:
+    explicit_distance = _coerce_positive_number(getattr(route, "distance_km", None))
+    if explicit_distance is not None:
+        return explicit_distance
+
+    return _calculate_distance_km_from_coordinates(
+        getattr(route, "origin_latitude", None),
+        getattr(route, "origin_longitude", None),
+        getattr(route, "destination_latitude", None),
+        getattr(route, "destination_longitude", None),
+    )
+
+
+def _safe_distance_km(route: Any) -> float:
+    derived_distance = _derive_distance_km(route)
+    if derived_distance is not None and derived_distance > 0:
+        return derived_distance
+
+    return 0.0
+
+
+def build_deterministic_simulation_response(
+    route: Any,
+    *,
+    detail: str,
+    error: str | None = None,
+) -> dict[str, object]:
+    route_name = _derive_route_name(route)
+    distance_km = _safe_distance_km(route)
+    disruption_type = getattr(route, "disruption_type", None) or "weather"
+    context = RouteContext(
+        route_id=getattr(route, "route_id", None),
+        route_name=route_name,
+        source_lat=float(getattr(route, "origin_latitude", 0) or 0),
+        source_lng=float(getattr(route, "origin_longitude", 0) or 0),
+        dest_lat=float(getattr(route, "destination_latitude", 0) or 0),
+        dest_lng=float(getattr(route, "destination_longitude", 0) or 0),
+        distance_km=distance_km,
+        cargo_type=(getattr(route, "cargo_type", None) or "general").strip().lower(),
+        priority=getattr(route, "priority", "standard"),
+    )
+    formula_metrics = _calculate_formula_metrics(
+        distance_km=distance_km,
+        disruption_type=disruption_type,
+    )
+    explanations = [
+        detail,
+        (
+            f"Distance {round(distance_km, 2)} km with disruption "
+            f"{disruption_type} applied at multiplier {formula_metrics['multiplier']}."
+        ),
+    ]
+    options = _build_formula_options(
+        context=context,
+        formula_metrics=formula_metrics,
+        explanations=explanations,
+        nearby_events=[],
+    )
+    best_option = min(options, key=lambda option: float(option["score"]))
+
+    response: dict[str, object] = {
         "route": route_name,
-        "risk": "medium",
-        "total_time": 36.0,
-        "total_cost": 3000.0,
-        "explanation": [reason],
+        "risk": best_option["risk"],
+        "total_time": best_option["total_time"],
+        "total_cost": best_option["total_cost"],
+        "explanation": best_option["explanation"],
+        "detail": detail,
         "options": options,
-        "best_option": "fallback_hybrid",
+        "best_option": best_option["name"],
+        "delay_days": formula_metrics["delay_days"],
+        "cost_impact_usd": formula_metrics["cost_impact_usd"],
     }
+    if error:
+        response["error"] = error
+    return response
 
 
 def upload_shipments_from_csv(db: Session, *, file_bytes: bytes) -> dict[str, str]:
@@ -190,28 +214,57 @@ def upload_shipments_from_csv(db: Session, *, file_bytes: bytes) -> dict[str, st
 
     decoded = file_bytes.decode("utf-8")
     reader = csv.DictReader(StringIO(decoded))
+    required_fields = {"source_lat", "source_lng", "dest_lat", "dest_lng"}
+    available_fields = set(reader.fieldnames or [])
 
-    count = 0
+    missing_fields = sorted(required_fields - available_fields)
+    if missing_fields:
+        db.rollback()
+        raise ValueError(
+            f"CSV is missing required fields: {', '.join(missing_fields)}"
+        )
+
+    inserted_rows = 0
     for row in reader:
         try:
-            shipment = Shipment(
-                route=row.get("route") or f"Shipment {count + 1}",
-                cost=float(row.get("cost", 0) or 0),
-                source_lat=float(row.get("source_lat", 0) or 0),
-                source_lng=float(row.get("source_lng", 0) or 0),
-                dest_lat=float(row.get("dest_lat", 0) or 0),
-                dest_lng=float(row.get("dest_lng", 0) or 0),
-                distance_km=float(row.get("distance_km", 0) or 0),
-                batch_id=batch.id,
+            origin_lat = float(row["source_lat"])
+            origin_lng = float(row["source_lng"])
+            dest_lat = float(row["dest_lat"])
+            dest_lng = float(row["dest_lng"])
+            distance_km = _calculate_distance_km_from_coordinates(
+                origin_lat,
+                origin_lng,
+                dest_lat,
+                dest_lng,
             )
-            db.add(shipment)
-            count += 1
+            if distance_km is None:
+                raise ValueError("Route coordinates could not be converted into distance")
+
+            route = Route(
+                name=(row.get("route") or f"Shipment {inserted_rows + 1}").strip(),
+                cost=float(row.get("cost", 0) or 0),
+                origin_lat=origin_lat,
+                origin_lng=origin_lng,
+                dest_lat=dest_lat,
+                dest_lng=dest_lng,
+                distance_km=float(row.get("distance_km") or distance_km),
+                batch_id=batch.id,
+                transport_mode=(row.get("transport_mode") or "multimodal").strip(),
+                risk_score=float(row.get("risk_score", 0) or 0),
+                risk_level=(row.get("risk_level") or "low").strip().lower(),
+            )
+            db.add(route)
+            inserted_rows += 1
         except (TypeError, ValueError) as exc:
             logger.warning("Skipping CSV row because it could not be parsed: %s", exc)
 
-    batch.total_shipments = count
+    batch.total_shipments = inserted_rows
     db.commit()
-    return {"message": f"Uploaded batch {batch.id} with {count} shipments"}
+    return {
+        "batch_id": str(batch.id),
+        "rows_inserted": str(inserted_rows),
+        "message": f"Inserted {inserted_rows} route rows into batch {batch.id}",
+    }
 
 
 def create_manual_route(db: Session, *, source: str, dest: str) -> dict[str, object]:
@@ -230,7 +283,7 @@ def create_manual_route(db: Session, *, source: str, dest: str) -> dict[str, obj
         db.flush()
 
         distance_km = geodesic((src.latitude, src.longitude), (dst.latitude, dst.longitude)).km
-        shipment = Shipment(
+        route = Route(
             route=f"{source} → {dest}",
             cost=max(distance_km * 0.75, 900),
             source_lat=src.latitude,
@@ -241,17 +294,17 @@ def create_manual_route(db: Session, *, source: str, dest: str) -> dict[str, obj
             batch_id=batch.id,
         )
 
-        db.add(shipment)
+        db.add(route)
         batch.total_shipments = 1
         db.commit()
-        db.refresh(shipment)
+        db.refresh(route)
 
         return {
-            "route_id": shipment.id,
+            "route_id": route.id,
             "source": [src.longitude, src.latitude],
             "dest": [dst.longitude, dst.latitude],
-            "route_name": shipment.route,
-            "distance": shipment.distance_km,
+            "route_name": route.route,
+            "distance": route.distance_km,
         }
     except Exception as exc:
         logger.warning("Manual route creation failed: %s", exc)
@@ -265,49 +318,53 @@ def get_latest_routes(db: Session) -> list[dict[str, object]]:
     if not latest:
         return []
 
-    shipments = db.query(Shipment).filter(Shipment.batch_id == latest.id).all()
+    routes = db.query(Route).filter(Route.batch_id == latest.id).all()
     return [
         {
-            "route_id": shipment.id,
-            "source": [shipment.source_lng, shipment.source_lat],
-            "dest": [shipment.dest_lng, shipment.dest_lat],
-            "route_name": shipment.route,
-            "distance": shipment.distance_km,
+            "route_id": route.id,
+            "source": [route.source_lng, route.source_lat],
+            "dest": [route.dest_lng, route.dest_lat],
+            "route_name": route.route,
+            "distance": route.distance_km,
         }
-        for shipment in shipments
+        for route in routes
     ]
 
 
-def run_simulation(shipments: list[Shipment]) -> dict[str, object]:
-    """Run the existing batch-level simulation logic."""
+def run_simulation(routes: list[Route]) -> dict[str, object]:
+    """Run deterministic batch-level simulation aggregates."""
 
     total_cost = 0.0
     total_delay = 0.0
     impacted_routes: list[str] = []
 
-    for shipment in shipments:
-        delay = shipment.distance_km * 0.001
-        extra_cost = shipment.distance_km * 0.5
+    for route in routes:
+        metrics = _calculate_formula_metrics(
+            distance_km=float(route.distance_km or 0),
+            disruption_type="weather",
+        )
 
-        if delay > 3:
-            impacted_routes.append(shipment.route)
+        if metrics["delay_days"] > metrics["base_delay_days"]:
+            impacted_routes.append(route.route)
 
-        total_delay += delay
-        total_cost += shipment.cost + extra_cost
+        total_delay += float(metrics["delay_days"])
+        total_cost += float(metrics["cost_impact_usd"])
 
     return {
-        "delay": round(total_delay, 2),
-        "cost": round(total_cost, 2),
+        "delay": round(total_delay, 1),
+        "cost": round(total_cost, 0),
         "impacted_routes": impacted_routes,
-        "recommendation": "Optimize long-distance routes",
+        "recommendation": "Review reroute, hold, and split options for impacted shipments.",
     }
 
 
 def run_full_simulation(db: Session) -> dict[str, object]:
-    """Run the existing batch endpoint against all shipments."""
+    """Run the batch simulation against persisted route records."""
 
-    shipments = db.query(Shipment).all()
-    return run_simulation(shipments)
+    routes = db.query(Route).all()
+    if not routes:
+        raise ValueError("No routes available")
+    return run_simulation(routes)
 
 
 def _risk_label(risk_score: float) -> str:
@@ -318,44 +375,87 @@ def _risk_label(risk_score: float) -> str:
     return "low"
 
 
+def _calculate_formula_metrics(
+    *, distance_km: float, disruption_type: str | None
+) -> dict[str, float | str]:
+    normalized_disruption = disruption_type if disruption_type in DISRUPTION_MULTIPLIERS else None
+    multiplier = DISRUPTION_MULTIPLIERS.get(normalized_disruption or "", 1.0)
+    base_delay_days = round(distance_km / 3500, 1)
+    delay_days = round(base_delay_days * multiplier, 1)
+    base_cost = round(distance_km * 0.85, 0)
+    cost_impact_usd = round(base_cost * multiplier, 0)
+
+    return {
+        "disruption_type": normalized_disruption or "none",
+        "multiplier": multiplier,
+        "base_delay_days": base_delay_days,
+        "delay_days": delay_days,
+        "base_cost": base_cost,
+        "cost_impact_usd": cost_impact_usd,
+    }
+
+
 def _severity_multiplier(severity: str) -> float:
     return {
-        "low": 0.55,
-        "medium": 1.0,
-        "high": 1.45,
+        "low": 0.34,
+        "medium": 0.67,
+        "high": 1.0,
     }.get(severity, 1.0)
 
 
 def _resolve_route_context(db: Session, route) -> RouteContext:
     if getattr(route, "route_id", None) is not None:
-        shipment = db.query(Shipment).filter(Shipment.id == route.route_id).first()
-        if not shipment:
-            raise HTTPException(status_code=404, detail="Route not found")
+        available_routes = db.query(Route).all()
+        if not available_routes:
+            raise ValueError("No routes available")
+
+        db_route = next(
+            (candidate for candidate in available_routes if candidate.id == route.route_id),
+            None,
+        )
+        if not db_route:
+            raise ValueError("Route not found")
+
+        distance_km = _coerce_positive_number(getattr(route, "distance_km", None))
+        if distance_km is None:
+            distance_km = _coerce_positive_number(getattr(db_route, "distance_km", None))
+        if distance_km is None:
+            distance_km = _calculate_distance_km_from_coordinates(
+                db_route.source_lat,
+                db_route.source_lng,
+                db_route.dest_lat,
+                db_route.dest_lng,
+            )
+        if distance_km is None or distance_km <= 0:
+            raise ValueError("Invalid route data")
 
         return RouteContext(
-            route_id=shipment.id,
-            route_name=shipment.route,
-            source_lat=shipment.source_lat,
-            source_lng=shipment.source_lng,
-            dest_lat=shipment.dest_lat,
-            dest_lng=shipment.dest_lng,
-            distance_km=float(getattr(route, "distance_km", None) or shipment.distance_km),
+            route_id=db_route.id,
+            route_name=db_route.route,
+            source_lat=db_route.source_lat,
+            source_lng=db_route.source_lng,
+            dest_lat=db_route.dest_lat,
+            dest_lng=db_route.dest_lng,
+            distance_km=distance_km,
             cargo_type=(route.cargo_type or "general").strip().lower(),
             priority=route.priority,
         )
 
-    distance_km = geodesic(
-        (route.origin_latitude, route.origin_longitude),
-        (route.destination_latitude, route.destination_longitude),
-    ).km
+    distance_km = _derive_distance_km(route)
+    if distance_km is None or distance_km <= 0:
+        raise ValueError("Invalid route data")
+
+    origin_name = getattr(route, "origin_name", None) or "Origin"
+    destination_name = getattr(route, "destination_name", None) or "Destination"
+
     return RouteContext(
         route_id=None,
-        route_name=f"{route.origin_name} → {route.destination_name}",
+        route_name=f"{origin_name} → {destination_name}",
         source_lat=float(route.origin_latitude),
         source_lng=float(route.origin_longitude),
         dest_lat=float(route.destination_latitude),
         dest_lng=float(route.destination_longitude),
-        distance_km=round(distance_km, 2),
+        distance_km=distance_km,
         cargo_type=(route.cargo_type or "general").strip().lower(),
         priority=route.priority,
     )
@@ -373,7 +473,7 @@ def _route_points(context: RouteContext) -> list[tuple[float, float]]:
     ]
 
 
-def _event_within_route_radius(context: RouteContext, event: ExternalEvent) -> bool:
+def _event_within_route_radius(context: RouteContext, event: Disruption) -> bool:
     event_point = (event.lat, event.lng)
     return any(
         geodesic(route_point, event_point).km <= event.radius_km
@@ -408,7 +508,7 @@ def _nearest_dataset_labels(context: RouteContext) -> list[str]:
     return labels
 
 
-def _serialize_event(event: ExternalEvent) -> dict[str, object]:
+def _serialize_event(event: Disruption) -> dict[str, object]:
     return {
         "id": event.id,
         "source": event.source,
@@ -422,25 +522,28 @@ def _serialize_event(event: ExternalEvent) -> dict[str, object]:
     }
 
 
-def _analyze_route_events(context: RouteContext, events: list[ExternalEvent]) -> dict[str, object]:
+def _analyze_route_events(context: RouteContext, events: list[Disruption]) -> dict[str, object]:
     try:
         nearby_events = [event for event in events if _event_within_route_radius(context, event)]
     except Exception:
         logger.exception("Failed to inspect external events for route %s", context.route_name)
         nearby_events = []
 
-    delay_multiplier = 1.0
-    cost_multiplier = 1.0
-    risk_delta = 0.0
+    disruption_count = len(nearby_events)
+    weather_score = 0.0
     explanations: list[str] = []
 
     for event in nearby_events:
-        impact = SOURCE_IMPACT_RULES.get(event.source, SOURCE_IMPACT_RULES["global_event"])
         severity_weight = _severity_multiplier(event.severity)
-        delay_multiplier += impact["delay_multiplier"] * severity_weight
-        cost_multiplier += impact["cost_multiplier"] * severity_weight
-        risk_delta += impact["risk_delta"] * severity_weight
-        explanations.append(f"{impact['explanation_prefix']} {event.description}")
+        if event.source == "weather":
+            weather_score += severity_weight
+            explanations.append(f"Weather pressure from {event.description}")
+        elif event.source == "traffic":
+            explanations.append(f"Traffic congestion near {event.description}")
+        elif event.source == "satellite":
+            explanations.append(f"Satellite hazard coverage around {event.description}")
+        else:
+            explanations.append(f"Global disruption context from {event.description}")
 
     if not explanations:
         explanations.append("No major external events are currently intersecting this route.")
@@ -453,50 +556,73 @@ def _analyze_route_events(context: RouteContext, events: list[ExternalEvent]) ->
 
     return {
         "nearby_events": nearby_events,
-        "delay_multiplier": delay_multiplier,
-        "cost_multiplier": cost_multiplier,
-        "risk_delta": risk_delta,
+        "disruption_count": disruption_count,
+        "weather_score": min(weather_score, 1.0),
         "explanations": explanations,
     }
 
 
-def _build_simulation_options(
+def _build_formula_options(
     *,
     context: RouteContext,
-    weighted_delay: float,
-    weighted_cost: float,
-    risk_score: float,
+    formula_metrics: dict[str, float | str],
     explanations: list[str],
-    nearby_events: list[ExternalEvent],
+    nearby_events: list[Disruption],
 ) -> list[dict[str, object]]:
     options: list[dict[str, object]] = []
-    priority_weight = PRIORITY_MULTIPLIERS.get(context.priority, 1.0)
-    cargo_weight = CARGO_RISK_MULTIPLIERS.get(context.cargo_type, 1.0)
     live_events_used = [_serialize_event(event) for event in nearby_events]
+    base_delay_days = float(formula_metrics["base_delay_days"])
+    base_cost = float(formula_metrics["base_cost"])
+    disruption_type = str(formula_metrics["disruption_type"])
+    multiplier = float(formula_metrics["multiplier"])
 
-    for name, adjustment in OPTION_ADJUSTMENTS.items():
-        option_delay = weighted_delay * adjustment["delay_multiplier"] * priority_weight
-        option_cost = weighted_cost * adjustment["cost_multiplier"]
-        option_risk_score = risk_score * adjustment["risk_multiplier"] * cargo_weight
-        score = (option_delay * 0.5) + ((option_cost / 1000) * 0.3) + ((option_risk_score / 100) * 0.2)
+    for profile in OPTION_PROFILES:
+        option_delay = round(base_delay_days * float(profile["delay_multiplier"]), 1)
+        option_cost = round(base_cost * float(profile["cost_multiplier"]), 0)
+        score = round((option_delay * 0.6) + ((option_cost / 10000) * 0.4), 3)
+        option_explanations = [
+            *explanations,
+            (
+                f"{profile['route_type']} option uses delay factor "
+                f"{profile['delay_multiplier']} and cost factor {profile['cost_multiplier']}."
+            ),
+            (
+                f"Disruption-adjusted baseline is {formula_metrics['delay_days']} days "
+                f"and ${int(float(formula_metrics['cost_impact_usd'])):,} for {disruption_type} "
+                f"at multiplier {multiplier}."
+            ),
+        ]
 
         options.append(
             {
-                "name": name,
-                "route_type": adjustment["route_type"],
+                "label": profile["label"],
+                "name": profile["name"],
+                "route_type": profile["route_type"],
                 "route": context.route_name,
-                "delay": round(option_delay, 2),
-                "cost": round(option_cost, 2),
-                "total_time": round(option_delay, 2),
-                "total_cost": round(option_cost, 2),
-                "risk": _risk_label(option_risk_score),
-                "score": round(score, 2),
-                "explanation": explanations,
+                "delay": option_delay,
+                "cost": option_cost,
+                "total_time": option_delay,
+                "total_cost": option_cost,
+                "risk": profile["risk_level"],
+                "score": score,
+                "explanation": option_explanations,
                 "event_types": sorted({event.source for event in nearby_events}),
                 "live_events_used": live_events_used,
+                "geometry": None,
+                "delay_days": option_delay,
+                "cost_impact_usd": option_cost,
+                "risk_level": profile["risk_level"],
+                "total_time_hours": round(option_delay * 24, 1),
+                "total_cost_usd": option_cost,
+                "explanations": option_explanations,
                 "_raw_score": score,
             }
         )
+
+    if options:
+        best_name = min(options, key=lambda option: option["_raw_score"])["name"]
+        for option in options:
+            option["best"] = option["name"] == best_name
 
     return options
 
@@ -514,39 +640,32 @@ def run_route_simulation(db: Session, route) -> dict[str, object]:
         context = _resolve_route_context(db, route)
         route_name = context.route_name
         if context.distance_km <= 0:
-            raise HTTPException(status_code=422, detail="distance_km must be greater than 0")
+            raise ValueError("Invalid route data")
 
-        disruption_multiplier = DISRUPTION_MULTIPLIERS[route.disruption_type]
         try:
-            external_events = db.query(ExternalEvent).all()
+            external_events = db.query(Disruption).all()
         except Exception:
             logger.exception("Failed to load external events for simulation")
             external_events = []
 
         route_events = _analyze_route_events(context, external_events)
-        normalized_distance = min(context.distance_km / 10000, 1)
-        risk_score = (
-            (normalized_distance * 42)
-            + route_events["risk_delta"]
-            + (PRIORITY_MULTIPLIERS.get(context.priority, 1.0) - 1) * 18
+        formula_metrics = _calculate_formula_metrics(
+            distance_km=context.distance_km,
+            disruption_type=route.disruption_type,
         )
 
-        base_delay = max(context.distance_km / 4200, 0.4)
-        base_cost = max(context.distance_km * 0.72, 800)
-        weighted_delay = base_delay * disruption_multiplier * route_events["delay_multiplier"]
-        weighted_cost = base_cost * disruption_multiplier * route_events["cost_multiplier"]
-
-        options = _build_simulation_options(
+        options = _build_formula_options(
             context=context,
-            weighted_delay=weighted_delay,
-            weighted_cost=weighted_cost,
-            risk_score=risk_score,
+            formula_metrics=formula_metrics,
             explanations=route_events["explanations"],
             nearby_events=route_events["nearby_events"],
         )
         if not options:
             logger.warning("Simulation produced no options for route %s; returning fallback", route_name)
-            return _fallback_simulation_response(route_name=route_name)
+            return build_deterministic_simulation_response(
+                route,
+                detail="Deterministic route generated because live simulation data was unavailable.",
+            )
 
         best_option = min(options, key=lambda option: option["_raw_score"])["name"]
         serialized_options = [
@@ -560,8 +679,14 @@ def run_route_simulation(db: Session, route) -> dict[str, object]:
             "disruption_type": route.disruption_type,
             "best_option": best_option,
             "options": serialized_options,
-            "risk": _risk_label(risk_score),
+            "risk": next(
+                option["risk"]
+                for option in serialized_options
+                if option["name"] == best_option
+            ),
             "explanation": route_events["explanations"],
+            "delay_days": formula_metrics["delay_days"],
+            "cost_impact_usd": formula_metrics["cost_impact_usd"],
         }
 
         broadcast_event("simulation_update", payload)
@@ -579,20 +704,27 @@ def run_route_simulation(db: Session, route) -> dict[str, object]:
         return {
             "route": context.route_name,
             "risk": payload["risk"],
-            "total_time": round(weighted_delay, 2),
-            "total_cost": round(weighted_cost, 2),
+            "total_time": next(
+                option["total_time"]
+                for option in serialized_options
+                if option["name"] == best_option
+            ),
+            "total_cost": next(
+                option["total_cost"]
+                for option in serialized_options
+                if option["name"] == best_option
+            ),
             "explanation": route_events["explanations"],
             "options": serialized_options,
             "best_option": best_option,
+            "delay_days": formula_metrics["delay_days"],
+            "cost_impact_usd": formula_metrics["cost_impact_usd"],
         }
-    except HTTPException:
+    except ValueError:
         raise
     except Exception:
-        logger.exception("Route simulation failed; returning fallback response")
-        return _fallback_simulation_response(
-            route_name=route_name,
-            reason="Fallback route due to missing data",
-        )
+        logger.exception("Route simulation failed")
+        raise
 
 
 def approve_simulation_decision(
@@ -630,14 +762,14 @@ def get_overview(db: Session) -> dict[str, object]:
             "best_action": "Upload data to begin",
         }
 
-    shipments = db.query(Shipment).filter(Shipment.batch_id == latest.id).all()
+    routes = db.query(Route).filter(Route.batch_id == latest.id).all()
     simulation = db.query(Simulation).filter(Simulation.batch_id == latest.id).first()
     high_risk_events = (
-        db.query(ExternalEvent).filter(ExternalEvent.severity == "high").count()
+        db.query(Disruption).filter(Disruption.severity == "high").count()
     )
 
     return {
-        "active_routes": len(shipments),
+        "active_routes": len(routes),
         "risk_alerts": high_risk_events,
         "cost_exposure": round(simulation.total_cost, 2) if simulation else 0,
         "best_action": simulation.best_action if simulation else "Review top route option",
@@ -661,21 +793,21 @@ def get_batches(db: Session) -> list[dict[str, object]]:
 def get_batch_data(db: Session, *, batch_id: int) -> list[dict[str, object]]:
     """Return shipment rows for one batch."""
 
-    shipments = db.query(Shipment).filter(Shipment.batch_id == batch_id).all()
+    routes = db.query(Route).filter(Route.batch_id == batch_id).all()
     return [
         {
-            "route_id": shipment.id,
-            "route": shipment.route,
-            "cost": shipment.cost,
-            "distance": shipment.distance_km,
-            "source": [shipment.source_lng, shipment.source_lat],
-            "dest": [shipment.dest_lng, shipment.dest_lat],
+            "route_id": route.id,
+            "route": route.route,
+            "cost": route.cost,
+            "distance": route.distance_km,
+            "source": [route.source_lng, route.source_lat],
+            "dest": [route.dest_lng, route.dest_lat],
         }
-        for shipment in shipments
+        for route in routes
     ]
 
 
-def list_live_events(db: Session) -> list[ExternalEvent]:
+def list_live_events(db: Session) -> list[Disruption]:
     """Expose active live events for route map overlays."""
 
     return list_live_event_records(db)
