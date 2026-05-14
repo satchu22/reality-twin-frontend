@@ -34,7 +34,8 @@ export default function HistoryPage() {
     }
 
     try {
-      return JSON.parse(sessionStorage.getItem("routeHistory") ?? "[]") as RouteHistoryItem[];
+      const storedHistory = sessionStorage.getItem("routeHistory");
+      return storedHistory ? (JSON.parse(storedHistory) as RouteHistoryItem[]) : [];
     } catch {
       return [];
     }
@@ -69,7 +70,9 @@ export default function HistoryPage() {
 
         <section className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur">
           <div className="mb-6">
-            <h2 className="text-2xl font-semibold text-white">Past Route Simulations</h2>
+            <h2 className="text-2xl font-semibold text-white">
+              Past Route Simulations
+            </h2>
             <p className="mt-2 text-sm text-slate-400">
               Recent manual route generations saved from this browser session.
             </p>
@@ -95,7 +98,9 @@ export default function HistoryPage() {
                   <div className="mt-4 grid grid-cols-3 gap-3 text-sm text-slate-300">
                     <div>
                       <p className="text-slate-500">Time</p>
-                      <p>{item.total_time} days</p>
+                      <p>
+                        {item.total_time} h / {(item.total_time / 24).toFixed(1)} d
+                      </p>
                     </div>
                     <div>
                       <p className="text-slate-500">Cost</p>
@@ -114,7 +119,9 @@ export default function HistoryPage() {
 
         <section className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur">
           <div className="mb-6">
-            <h2 className="text-2xl font-semibold text-white">Uploaded Dataset History</h2>
+            <h2 className="text-2xl font-semibold text-white">
+              Uploaded Dataset History
+            </h2>
             <p className="mt-2 text-sm text-slate-400">
               Existing backend batch history remains available here.
             </p>
@@ -132,7 +139,9 @@ export default function HistoryPage() {
                     : "border-white/10 bg-slate-950/40 hover:bg-white/10"
                 }`}
               >
-                <p className="font-semibold text-white">Batch #{batch.batch_id}</p>
+                <p className="font-semibold text-white">
+                  Batch #{batch.batch_id}
+                </p>
                 <p className="mt-1 text-sm text-slate-400">
                   {batch.total_shipments} shipments
                 </p>
@@ -152,10 +161,15 @@ export default function HistoryPage() {
                 </thead>
                 <tbody>
                   {data.map((row, index) => (
-                    <tr key={`${row.route}-${index}`} className="border-t border-white/10">
+                    <tr
+                      key={`${row.route}-${index}`}
+                      className="border-t border-white/10"
+                    >
                       <td className="p-4 text-white">{row.route}</td>
                       <td className="p-4 text-slate-300">${row.cost}</td>
-                      <td className="p-4 text-slate-300">{row.distance} km</td>
+                      <td className="p-4 text-slate-300">
+                        {row.distance} km
+                      </td>
                     </tr>
                   ))}
                 </tbody>

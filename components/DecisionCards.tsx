@@ -1,24 +1,6 @@
-export type DecisionOption = {
-  name: string;
-  route_type: string;
-  route: string;
-  delay: number;
-  cost: number;
-  total_time: number;
-  total_cost: number;
-  risk: string;
-  score?: number;
-  explanation: string[];
-  event_types: Array<"weather" | "traffic" | "satellite" | "global_event">;
-  live_events_used: Array<{
-    id: number;
-    source: "weather" | "traffic" | "satellite" | "global_event";
-    event_type: string;
-    severity: "low" | "medium" | "high";
-    description: string;
-    confidence: number;
-  }>;
-};
+import { type SimulationOption } from "@/lib/simulate";
+
+export type DecisionOption = SimulationOption;
 
 type DecisionCardsProps = {
   options: DecisionOption[];
@@ -28,6 +10,19 @@ type DecisionCardsProps = {
   approvedOptionName?: string | null;
   emptyMessage?: string;
 };
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatHours(value: number) {
+  const days = value / 24;
+  return `${value.toFixed(1)} h (${days.toFixed(1)} d)`;
+}
 
 export default function DecisionCards({
   options,
@@ -45,36 +40,11 @@ export default function DecisionCards({
     );
   }
 
-  const bestOption = options.reduce<DecisionOption | null>((currentBest, option) => {
-    if (!currentBest) {
-      return option;
-    }
-
-    if (typeof option.score !== "number") {
-      return currentBest;
-    }
-
-    if (
-      typeof currentBest.score !== "number" ||
-      option.score < currentBest.score
-    ) {
-      return option;
-    }
-
-    return currentBest;
-  }, null);
-
   return (
-    <div className="grid gap-4 md:grid-cols-3">
+    <div className="grid gap-4 xl:grid-cols-3">
       {options.map((option) => {
-        const isBest = (bestOptionName || bestOption?.name) === option.name;
+        const isBest = (bestOptionName || options[0]?.name) === option.name;
         const isApproved = approvedOptionName === option.name;
-        const iconMap = {
-          weather: "⛈",
-          traffic: "🚦",
-          satellite: "🔥",
-          global_event: "🌐",
-        } as const;
 
         return (
           <article
@@ -86,9 +56,14 @@ export default function DecisionCards({
             }`}
           >
             <div className="flex items-start justify-between gap-3">
-              <h3 className="text-xl font-semibold capitalize text-white">
-                {option.name}
-              </h3>
+              <div>
+                <h3 className="text-xl font-semibold capitalize text-white">
+                  {option.route_type}
+                </h3>
+                <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-400">
+                  {option.label ?? option.name}
+                </p>
+              </div>
 
               {isBest && (
                 <span className="rounded-full bg-emerald-400 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-950">
@@ -99,61 +74,43 @@ export default function DecisionCards({
 
             <div className="mt-6 space-y-3 text-sm text-slate-200">
               <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
-                <span className="text-slate-400">Route Type</span>
-                <span className="font-medium text-white">{option.route_type}</span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
-                <span className="text-slate-400">Route</span>
-                <span className="font-medium text-white">{option.route}</span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
-                <span className="text-slate-400">Delay</span>
-                <span className="font-medium text-white">{option.delay} days</span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
-                <span className="text-slate-400">Cost</span>
-                <span className="font-medium text-white">${option.cost}</span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
                 <span className="text-slate-400">Total Time</span>
-                <span className="font-medium text-white">{option.total_time} days</span>
+                <span className="font-medium text-white">
+                  {formatHours(option.total_time_hours)}
+                </span>
               </div>
 
               <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
                 <span className="text-slate-400">Total Cost</span>
-                <span className="font-medium text-white">${option.total_cost}</span>
+                <span className="font-medium text-white">
+                  {formatCurrency(option.total_cost_usd)}
+                </span>
               </div>
 
               <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
                 <span className="text-slate-400">Risk Level</span>
                 <span className="font-medium capitalize text-white">
-                  {option.risk}
+                  {option.risk_level}
                 </span>
+              </div>
+
+              <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
+                <span className="text-slate-400">Risk Score</span>
+                <span className="font-medium text-white">{option.risk_score}</span>
+              </div>
+
+              <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
+                <span className="text-slate-400">Score</span>
+                <span className="font-medium text-white">{option.score.toFixed(3)}</span>
               </div>
             </div>
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                Explanation
+                Why Recommended
               </p>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                {option.event_types.map((eventType) => (
-                  <span
-                    key={`${option.name}-${eventType}`}
-                    className="rounded-full bg-white/10 px-2 py-1 text-xs text-slate-200"
-                  >
-                    {iconMap[eventType]} {eventType}
-                  </span>
-                ))}
-              </div>
-
               <div className="mt-3 space-y-2 text-sm text-slate-300">
-                {option.explanation.map((line) => (
+                {option.explanations.map((line) => (
                   <p key={`${option.name}-${line}`}>• {line}</p>
                 ))}
               </div>
@@ -161,18 +118,32 @@ export default function DecisionCards({
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                Live Events Used
+                Route Chain
               </p>
-              <div className="mt-3 space-y-2 text-sm text-slate-300">
-                {option.live_events_used.length > 0 ? (
-                  option.live_events_used.map((event) => (
-                    <p key={`${option.name}-${event.id}`}>
-                      {event.source} · {event.severity} · {event.description}
+              <div className="mt-3 space-y-3">
+                {option.steps.map((step, index) => (
+                  <div
+                    key={`${option.name}-${step.mode}-${index}`}
+                    className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold capitalize text-white">
+                        {step.mode}
+                      </span>
+                      <span className="text-xs text-slate-400">
+                        {step.distance_km.toFixed(1)} km
+                      </span>
+                    </div>
+                    <p className="mt-2 text-slate-200">
+                      {step.from} → {step.to}
                     </p>
-                  ))
-                ) : (
-                  <p>No live events were needed for this option.</p>
-                )}
+                    <p className="mt-1 text-xs text-slate-400">{step.purpose}</p>
+                    <div className="mt-2 flex items-center justify-between text-xs">
+                      <span>{step.time_hours.toFixed(1)} h</span>
+                      <span>{formatCurrency(step.cost_usd)}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 

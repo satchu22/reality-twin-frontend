@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { Suspense, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 import { type DecisionOption } from "@/components/DecisionCards";
+import MapRouteDetails from "@/components/MapRouteDetails";
 import { useRealtime } from "@/components/RealtimeProvider";
 import RoutePanel, { type SelectedRoute } from "@/components/RoutePanel";
 import { fetchEvents, type LiveEvent } from "@/lib/events";
@@ -26,7 +27,7 @@ if (mapboxToken) {
 
 type RouteStatus = SelectedRoute["status"];
 
-type RouteFeature = GeoJSON.Feature<GeoJSON.LineString> & {
+type RouteFeature = Omit<GeoJSON.Feature<GeoJSON.LineString>, "properties"> & {
   properties: {
     route_id: number;
     route_name: string;
@@ -41,18 +42,19 @@ type RouteFeatureCollection = GeoJSON.FeatureCollection<GeoJSON.LineString> & {
 };
 
 type DecisionOverlay = {
-  layerId: string;
-  sourceId: string;
+  layerIds: string[];
+  sourceIds: string[];
+  markers: mapboxgl.Marker[];
   option: SimulationOption;
-  color: string;
   baseWidth: number;
-  geometry: [number, number][];
 };
 
 type StoredLocation = {
   name: string;
-  latitude: number;
-  longitude: number;
+  lat?: number;
+  lng?: number;
+  latitude?: number;
+  longitude?: number;
 };
 
 const EMPTY_FEATURE_COLLECTION: RouteFeatureCollection = {
@@ -65,6 +67,19 @@ const DECISION_ROUTE_STYLES = [
   { color: "#facc15", width: 4, label: "Alternative" },
   { color: "#ef4444", width: 3, label: "High Risk" },
 ] as const;
+
+function routeModeColor(mode: "road" | "air" | "sea" | "handling") {
+  if (mode === "road") {
+    return "#3b82f6";
+  }
+  if (mode === "air") {
+    return "#22d3ee";
+  }
+  if (mode === "sea") {
+    return "#14b8a6";
+  }
+  return "#e2e8f0";
+}
 
 function parseRouteDistance(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -88,6 +103,24 @@ function parseQueryCoordinate(value: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function getStoredLatitude(location: StoredLocation | null): number | null {
+  if (!location) {
+    return null;
+  }
+
+  const value = location.latitude ?? location.lat;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getStoredLongitude(location: StoredLocation | null): number | null {
+  if (!location) {
+    return null;
+  }
+
+  const value = location.longitude ?? location.lng;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function eventColor(source: LiveEvent["source"]) {
   return {
     weather: "#3b82f6",
@@ -99,17 +132,12 @@ function eventColor(source: LiveEvent["source"]) {
 
 function buildLineStringFeature(coordinates: [number, number][]) {
   return {
-    type: "FeatureCollection" as const,
-    features: [
-      {
-        type: "Feature" as const,
-        properties: {},
-        geometry: {
-          type: "LineString" as const,
-          coordinates,
-        },
-      },
-    ],
+    type: "Feature" as const,
+    properties: {},
+    geometry: {
+      type: "LineString" as const,
+      coordinates,
+    },
   };
 }
 
@@ -132,65 +160,28 @@ async function getRouteGeometry(
   }
 }
 
-async function getDecisionRouteGeometries(
-  start: [number, number],
-  end: [number, number],
-): Promise<[number, number][][]> {
-  if (!mapboxToken) {
-    return [[start, end]];
+function parseStoredItem<T>(key: string): T | null {
+  const rawValue = sessionStorage.getItem(key);
+  if (!rawValue) {
+    return null;
   }
 
   try {
-    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${start[0]},${start[1]};${end[0]},${end[1]}?alternatives=true&geometries=geojson&overview=full&steps=true&access_token=${mapboxToken}`;
-    const response = await fetch(url);
-    const result = await response.json();
-    const routes = result.routes?.map(
-      (route: { geometry?: { coordinates?: [number, number][] } }) =>
-        route.geometry?.coordinates,
-    );
-    const validRoutes = routes?.filter(
-      (route: [number, number][] | undefined): route is [number, number][] =>
-        Array.isArray(route) && route.length >= 2,
-    );
-
-    return validRoutes?.length ? validRoutes : [[start, end]];
+    return JSON.parse(rawValue) as T;
   } catch (error) {
-    console.error("Decision route geometry error:", error);
-    return [[start, end]];
+    console.error(`Failed to parse ${key} from sessionStorage`, error);
+    return null;
   }
 }
 
-function getRerouteCoordinates(
-  coordinates: [number, number][],
-  magnitude = 0.35,
-  latMagnitude = 0.2,
-) {
-  if (coordinates.length < 2) {
-    return coordinates;
+function getStepEndpoints(step: SimulationOption["steps"][number]) {
+  if (!Array.isArray(step.geometry) || step.geometry.length < 2) {
+    return null;
   }
 
-  return coordinates.map(([lng, lat], index) => {
-    const direction = index % 2 === 0 ? 1 : -1;
-    return [
-      lng + magnitude * direction,
-      lat + latMagnitude * direction,
-    ] as [number, number];
-  });
-}
-
-function buildRouteAlternativeGeometry(
-  baseCoordinates: [number, number][],
-  variantIndex: number,
-) {
-  if (variantIndex === 0) {
-    return baseCoordinates;
-  }
-
-  if (variantIndex === 1) {
-    return getRerouteCoordinates(baseCoordinates, 0.18, 0.12);
-  }
-
-  return getRerouteCoordinates(baseCoordinates, 0.32, 0.18);
+  const start = step.geometry[0];
+  const end = step.geometry[step.geometry.length - 1];
+  return [start, end] as [[number, number], [number, number]];
 }
 
 async function buildRouteFeatureCollection(
@@ -230,7 +221,7 @@ async function buildRouteFeatureCollection(
   };
 }
 
-export default function MapPage() {
+function MapPageContent() {
   const searchParams = useSearchParams();
   const { isPollingFallback, latestRouteUpdate, latestSimulationUpdate, pollTick } =
     useRealtime();
@@ -262,10 +253,10 @@ export default function MapPage() {
   const queryDestLng = parseQueryCoordinate(searchParams.get("dest_lng"));
   const queryOriginName = searchParams.get("origin_name");
   const queryDestName = searchParams.get("dest_name");
-  const originLat = queryOriginLat ?? storedOrigin?.latitude ?? null;
-  const originLng = queryOriginLng ?? storedOrigin?.longitude ?? null;
-  const destLat = queryDestLat ?? storedDestination?.latitude ?? null;
-  const destLng = queryDestLng ?? storedDestination?.longitude ?? null;
+  const originLat = queryOriginLat ?? getStoredLatitude(storedOrigin);
+  const originLng = queryOriginLng ?? getStoredLongitude(storedOrigin);
+  const destLat = queryDestLat ?? getStoredLatitude(storedDestination);
+  const destLng = queryDestLng ?? getStoredLongitude(storedDestination);
   const originName = queryOriginName ?? storedOrigin?.name ?? null;
   const destName = queryDestName ?? storedDestination?.name ?? null;
   const hasManualRoute =
@@ -284,44 +275,59 @@ export default function MapPage() {
     : [];
 
   useEffect(() => {
-    const savedOrigin = sessionStorage.getItem("origin");
-    const savedDestination = sessionStorage.getItem("destination");
-    const savedSimulation = sessionStorage.getItem("routeSimulation");
-    const savedOptions = sessionStorage.getItem("routeOptions");
+    const parsedRoutes = parseStoredItem<SimulationOption[]>("routeOptions");
+    const parsedOrigin = parseStoredItem<StoredLocation>("origin");
+    const parsedDestination = parseStoredItem<StoredLocation>("destination");
+    const parsedSimulation = parseStoredItem<SimulationResponse>("routeSimulation");
 
-    if (savedOrigin) {
-      setStoredOrigin(JSON.parse(savedOrigin) as StoredLocation);
+    console.log("Loaded origin:", parsedOrigin);
+    console.log("Loaded destination:", parsedDestination);
+    console.log("Loaded routes:", parsedRoutes);
+    console.log("Map loaded route data", {
+      origin: parsedOrigin,
+      destination: parsedDestination,
+      routes: parsedRoutes,
+    });
+
+    if (parsedOrigin) {
+      setStoredOrigin(parsedOrigin);
     }
 
-    if (savedDestination) {
-      setStoredDestination(JSON.parse(savedDestination) as StoredLocation);
+    if (parsedDestination) {
+      setStoredDestination(parsedDestination);
     }
 
-    if (savedSimulation) {
-      const parsedSimulation = JSON.parse(savedSimulation) as SimulationResponse;
-      setSimulationResult(parsedSimulation);
-      console.log("Routes loaded in map", parsedSimulation.options);
-      return;
+    if (parsedSimulation) {
+      if (Array.isArray(parsedSimulation.options) && parsedSimulation.options.length > 0) {
+        setSimulationResult(parsedSimulation);
+        console.log("Routes loaded in map", parsedSimulation.options);
+        return;
+      }
     }
 
-    if (savedOptions && savedOrigin && savedDestination) {
-      const parsedOptions = JSON.parse(savedOptions) as SimulationOption[];
-      const parsedOrigin = JSON.parse(savedOrigin) as StoredLocation;
-      const parsedDestination = JSON.parse(savedDestination) as StoredLocation;
-      const bestOption = [...parsedOptions].sort(
+    if (parsedRoutes) {
+      console.log("Routes loaded in map", parsedRoutes);
+
+      if (!Array.isArray(parsedRoutes) || parsedRoutes.length === 0) {
+        return;
+      }
+
+      const bestOption = [...parsedRoutes].sort(
         (left, right) => (left.score ?? Number.POSITIVE_INFINITY) - (right.score ?? Number.POSITIVE_INFINITY),
       )[0];
 
       setSimulationResult({
-        route: `${parsedOrigin.name} → ${parsedDestination.name}`,
+        route:
+          parsedOrigin && parsedDestination
+            ? `${parsedOrigin.name} → ${parsedDestination.name}`
+            : bestOption?.route ?? "Generated routes",
         total_time: bestOption?.total_time ?? 0,
         total_cost: bestOption?.total_cost ?? 0,
         risk: bestOption?.risk ?? "medium",
         explanation: bestOption?.explanation ?? [],
-        options: parsedOptions,
+        options: parsedRoutes,
         best_option: bestOption?.name ?? "",
       });
-      console.log("Routes loaded in map", parsedOptions);
     }
   }, []);
 
@@ -379,11 +385,18 @@ export default function MapPage() {
     decisionPopupRef.current = null;
 
     for (const overlay of decisionOverlaysRef.current) {
-      if (map.getLayer(overlay.layerId)) {
-        map.removeLayer(overlay.layerId);
+      for (const marker of overlay.markers) {
+        marker.remove();
       }
-      if (map.getSource(overlay.sourceId)) {
-        map.removeSource(overlay.sourceId);
+      for (const layerId of overlay.layerIds) {
+        if (map.getLayer(layerId)) {
+          map.removeLayer(layerId);
+        }
+      }
+      for (const sourceId of overlay.sourceIds) {
+        if (map.getSource(sourceId)) {
+          map.removeSource(sourceId);
+        }
       }
     }
 
@@ -430,33 +443,6 @@ export default function MapPage() {
     });
   }
 
-  function getSimulationEndpoints(): [[number, number], [number, number]] | null {
-    if (hasManualRoute) {
-      return [
-        [originLng as number, originLat as number],
-        [destLng as number, destLat as number],
-      ];
-    }
-
-    if (!selectedRoute) {
-      return null;
-    }
-
-    const feature = routesDataRef.current.features.find(
-      (candidate) => candidate.properties.route_id === selectedRoute.routeId,
-    );
-    const coordinates = feature?.geometry.coordinates;
-
-    if (!coordinates || coordinates.length < 2) {
-      return null;
-    }
-
-    return [
-      coordinates[0] as [number, number],
-      coordinates[coordinates.length - 1] as [number, number],
-    ];
-  }
-
   function applyDecisionRouteSelection(optionName: string | null) {
     const map = mapRef.current;
     if (!map) {
@@ -464,17 +450,19 @@ export default function MapPage() {
     }
 
     for (const overlay of decisionOverlaysRef.current) {
-      if (map.getLayer(overlay.layerId)) {
-        map.setPaintProperty(
-          overlay.layerId,
-          "line-width",
-          optionName === overlay.option.name ? overlay.baseWidth + 2 : overlay.baseWidth,
-        );
-        map.setPaintProperty(
-          overlay.layerId,
-          "line-opacity",
-          optionName && optionName !== overlay.option.name ? 0.45 : 0.82,
-        );
+      for (const layerId of overlay.layerIds) {
+        if (map.getLayer(layerId)) {
+          map.setPaintProperty(
+            layerId,
+            "line-width",
+            optionName === overlay.option.name ? overlay.baseWidth + 2 : overlay.baseWidth,
+          );
+          map.setPaintProperty(
+            layerId,
+            "line-opacity",
+            optionName && optionName !== overlay.option.name ? 0.45 : 0.85,
+          );
+        }
       }
     }
   }
@@ -493,13 +481,6 @@ export default function MapPage() {
       return;
     }
 
-    const endpoints = getSimulationEndpoints();
-    if (!endpoints) {
-      return;
-    }
-
-    const [start, end] = endpoints;
-    const alternativeGeometries = await getDecisionRouteGeometries(start, end);
     const sortedOptions = [...options].sort((left, right) => {
       const leftScore = typeof left.score === "number" ? left.score : Number.POSITIVE_INFINITY;
       const rightScore = typeof right.score === "number" ? right.score : Number.POSITIVE_INFINITY;
@@ -509,88 +490,149 @@ export default function MapPage() {
     const overlays: DecisionOverlay[] = [];
     const bounds = new mapboxgl.LngLatBounds();
 
-    for (const [index, option] of sortedOptions.entries()) {
+    for (const [index, option] of sortedOptions.slice(0, 3).entries()) {
       const style =
         DECISION_ROUTE_STYLES[index] ?? DECISION_ROUTE_STYLES[DECISION_ROUTE_STYLES.length - 1];
-      const sourceId = `decision-route-${index}`;
-      const layerId = `${sourceId}-line`;
-      const geometryFromApi = alternativeGeometries[index];
-      const fallbackGeometry = buildRouteAlternativeGeometry(
-        alternativeGeometries[0] ?? [start, end],
-        index,
+      const layerIds: string[] = [];
+      const sourceIds: string[] = [];
+      const markers: mapboxgl.Marker[] = [];
+
+      const stepGeometries = await Promise.all(
+        option.steps.map(async (step) => {
+          if (step.mode === "handling") {
+            return null;
+          }
+
+          const endpoints = getStepEndpoints(step);
+          if (!endpoints) {
+            return null;
+          }
+
+          if (step.mode === "road") {
+            return getRouteGeometry(endpoints[0], endpoints[1]);
+          }
+
+          return step.geometry;
+        }),
       );
-      const geometry =
-        option.geometry && option.geometry.length >= 2
-          ? option.geometry
-          : geometryFromApi && geometryFromApi.length >= 2
-            ? geometryFromApi
-            : fallbackGeometry;
 
-      map.addSource(sourceId, {
-        type: "geojson",
-        data: buildLineStringFeature(geometry),
-      });
+      option.steps.forEach((step, stepIndex) => {
+        if (step.mode === "handling") {
+          const endpoints = getStepEndpoints(step);
+          if (!endpoints) {
+            return;
+          }
 
-      map.addLayer({
-        id: layerId,
-        type: "line",
-        source: sourceId,
-        layout: {
-          "line-join": "round",
-          "line-cap": "round",
-        },
-        paint: {
-          "line-color": style.color,
-          "line-width": style.width,
-          "line-opacity": 0.82,
-        },
-      });
+          const element = document.createElement("div");
+          element.className = "h-3 w-3 rounded-full border border-white shadow";
+          element.style.backgroundColor = style.color;
 
-      map.on("mouseenter", layerId, () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
+          const marker = new mapboxgl.Marker({ element })
+            .setLngLat(endpoints[0])
+            .setPopup(
+              new mapboxgl.Popup({ offset: 16 }).setHTML(
+                `<div style="min-width: 180px; color: #0f172a;">
+                  <div style="font-weight: 700; margin-bottom: 6px;">Handling Hub</div>
+                  <div style="font-size: 12px;">${step.from}</div>
+                  <div style="margin-top: 6px; font-size: 12px; color: #334155;">${step.purpose}</div>
+                </div>`,
+              ),
+            )
+            .addTo(map);
+          markers.push(marker);
+          bounds.extend(endpoints[0]);
+          return;
+        }
 
-      map.on("mouseleave", layerId, () => {
-        map.getCanvas().style.cursor = "";
-      });
+        const geometry = stepGeometries[stepIndex];
+        if (!geometry || geometry.length < 2) {
+          return;
+        }
 
-      map.on("click", layerId, (event) => {
-        applyDecisionRouteSelection(option.name);
+        const sourceId = `decision-route-${index}-${stepIndex}`;
+        const layerId = `${sourceId}-line`;
 
-        const popupCoordinate =
-          event.lngLat ??
-          new mapboxgl.LngLat(geometry[Math.floor(geometry.length / 2)][0], geometry[Math.floor(geometry.length / 2)][1]);
+        if (map.getLayer(layerId)) {
+          map.removeLayer(layerId);
+        }
+        if (map.getSource(sourceId)) {
+          map.removeSource(sourceId);
+        }
 
-        decisionPopupRef.current?.remove();
-        decisionPopupRef.current = new mapboxgl.Popup({ offset: 18 })
-          .setLngLat(popupCoordinate)
-          .setHTML(
-            `
-              <div style="min-width: 220px; color: #0f172a;">
-                <div style="font-weight: 700; margin-bottom: 8px;">${option.route_type}</div>
-                <div>Total Time: ${option.total_time} days</div>
-                <div>Total Cost: $${option.total_cost}</div>
-                <div>Risk: ${option.risk}</div>
-                <div style="margin-top: 8px; font-size: 12px; color: #334155;">
-                  ${option.explanation[0] ?? "No explanation available."}
+        map.addSource(sourceId, {
+          type: "geojson",
+          data: buildLineStringFeature(geometry),
+        });
+
+        map.addLayer({
+          id: layerId,
+          type: "line",
+          source: sourceId,
+          layout: {
+            "line-join": "round",
+            "line-cap": "round",
+          },
+          paint: {
+            "line-color": routeModeColor(step.mode),
+            "line-width": style.width,
+            "line-opacity": 0.85,
+            ...(step.mode === "air"
+              ? { "line-dasharray": [2, 2] }
+              : step.mode === "sea"
+                ? { "line-dasharray": [3, 2] }
+                : {}),
+          },
+        });
+
+        map.on("mouseenter", layerId, () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+
+        map.on("mouseleave", layerId, () => {
+          map.getCanvas().style.cursor = "";
+        });
+
+        map.on("click", layerId, (event) => {
+          applyDecisionRouteSelection(option.name);
+
+          const popupCoordinate =
+            event.lngLat ??
+            new mapboxgl.LngLat(
+              geometry[Math.floor(geometry.length / 2)][0],
+              geometry[Math.floor(geometry.length / 2)][1],
+            );
+
+          decisionPopupRef.current?.remove();
+          decisionPopupRef.current = new mapboxgl.Popup({ offset: 18 })
+            .setLngLat(popupCoordinate)
+            .setHTML(
+              `
+                <div style="min-width: 240px; color: #0f172a;">
+                  <div style="font-weight: 700; margin-bottom: 8px; text-transform: capitalize;">${option.route_type}</div>
+                  <div>Total Time: ${option.total_time_hours.toFixed(1)} hours</div>
+                  <div>Total Cost: $${option.total_cost_usd}</div>
+                  <div>Risk: ${option.risk_level}</div>
+                  <div style="margin-top: 8px; font-size: 12px;">${step.from} → ${step.to}</div>
+                  <div style="margin-top: 4px; font-size: 12px; color: #334155;">${step.purpose}</div>
                 </div>
-              </div>
-            `,
-          )
-          .addTo(map);
-      });
+              `,
+            )
+            .addTo(map);
+        });
 
-      for (const coordinate of geometry) {
-        bounds.extend(coordinate);
-      }
+        for (const coordinate of geometry) {
+          bounds.extend(coordinate);
+        }
+        sourceIds.push(sourceId);
+        layerIds.push(layerId);
+      });
 
       overlays.push({
-        layerId,
-        sourceId,
+        layerIds,
+        sourceIds,
+        markers,
         option,
-        color: style.color,
         baseWidth: style.width,
-        geometry,
       });
     }
 
@@ -644,19 +686,14 @@ export default function MapPage() {
     const routeSource = map.getSource("manual-route") as mapboxgl.GeoJSONSource | undefined;
 
     routeSource?.setData({
-      type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          properties: {
-            route_name: `${originName ?? "Origin"}-${destName ?? "Destination"}`,
-          },
-          geometry: {
-            type: "LineString",
-            coordinates,
-          },
-        },
-      ],
+      type: "Feature",
+      properties: {
+        route_name: `${originName ?? "Origin"}-${destName ?? "Destination"}`,
+      },
+      geometry: {
+        type: "LineString",
+        coordinates,
+      },
     });
 
     clearManualMarkers();
@@ -683,13 +720,26 @@ export default function MapPage() {
       setRoutesLoading(false);
       return;
     }
+const container = document.getElementById("map");
+if (!container) return;
 
-    const map = new mapboxgl.Map({
-      container: "map",
-      style: "mapbox://styles/mapbox/dark-v11",
-      center: [-95, 37],
-      zoom: 3,
-    });
+if (container.childNodes.length > 0) return;
+
+if (typeof window === "undefined") return;
+
+if (!mapboxgl.supported()) {
+  console.error("WebGL not supported");
+  return;
+}
+
+mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN!;
+
+const map = new mapboxgl.Map({
+  container: container,
+  style: "mapbox://styles/mapbox/dark-v11",
+  center: [-95, 37],
+  zoom: 3,
+});
 
     mapRef.current = map;
 
@@ -871,20 +921,25 @@ export default function MapPage() {
     }
 
     const routeId = Number(latestRouteUpdate.route_id);
+    const updatedFeatures = routesDataRef.current.features.map<RouteFeature>((feature) => {
+      const properties = feature.properties as RouteFeature["properties"];
+      if (properties.route_id !== routeId) {
+        return feature as RouteFeature;
+      }
+
+      return {
+        ...feature,
+        properties: {
+          ...properties,
+          color: latestRouteUpdate.status === "high risk" ? "#ef4444" : "#22d3ee",
+          status: latestRouteUpdate.status === "high risk" ? "high risk" : "normal",
+        },
+      };
+    });
+
     updateRoutesSource({
       ...routesDataRef.current,
-      features: routesDataRef.current.features.map((feature) =>
-        feature.properties.route_id !== routeId
-          ? feature
-          : {
-              ...feature,
-              properties: {
-                ...feature.properties,
-                color: latestRouteUpdate.status === "high risk" ? "#ef4444" : "#22d3ee",
-                status: latestRouteUpdate.status === "high risk" ? "high risk" : "normal",
-              },
-            },
-      ),
+      features: updatedFeatures,
     });
   }, [latestRouteUpdate]);
 
@@ -962,15 +1017,17 @@ export default function MapPage() {
         disruption_type: "weather",
       });
 
-      const updatedFeatures = routesDataRef.current.features.map((feature) => {
-        if (feature.properties.route_id !== selectedRoute.routeId) {
-          return feature;
+      const updatedFeatures = routesDataRef.current.features.map<RouteFeature>((feature) => {
+        const properties = feature.properties as RouteFeature["properties"];
+
+        if (properties.route_id !== selectedRoute.routeId) {
+          return feature as RouteFeature;
         }
 
         return {
           ...feature,
           properties: {
-            ...feature.properties,
+            ...properties,
             color: "#ef4444",
             status: "high risk" as const,
           },
@@ -1054,7 +1111,7 @@ export default function MapPage() {
         <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white shadow-xl backdrop-blur">
           <p className="text-sm font-semibold text-cyan-300">Route Workflow</p>
           <p className="mt-1 text-sm text-slate-300">
-            Click a route to open details, run a disruption simulation, and approve the best
+            Click a route to open details, generate logistics route options, and approve the best
             decision.
           </p>
         </div>
@@ -1072,11 +1129,17 @@ export default function MapPage() {
         <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
           <p className="font-semibold text-white">Decision Legend</p>
           <div className="mt-2 space-y-1">
-            <p>Green = Best Route</p>
-            <p>Yellow = Alternative</p>
-            <p>Red = High Risk</p>
+            <p>Blue solid = road legs</p>
+            <p>Cyan dashed = air legs</p>
+            <p>Teal dashed = sea legs</p>
+            <p>Small hub markers = handling points</p>
           </div>
         </div>
+
+        <MapRouteDetails
+          routes={simulationResult?.options ?? []}
+          bestRouteName={simulationResult?.best_option ?? null}
+        />
 
         {routesLoading && (
           <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
@@ -1111,7 +1174,7 @@ export default function MapPage() {
 
         {!hasManualRoute && (
           <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
-            No routes generated yet
+            No route data found. Please simulate first.
           </div>
         )}
 
@@ -1149,5 +1212,19 @@ export default function MapPage() {
         onApprove={handleApproveDecision}
       />
     </div>
+  );
+}
+
+export default function MapPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-950 px-6 py-10 text-white">
+          Loading map...
+        </div>
+      }
+    >
+      <MapPageContent />
+    </Suspense>
   );
 }

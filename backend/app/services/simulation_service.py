@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from ..models.event import Disruption
 from ..models.route import Batch, Route
 from ..models.scenario import Simulation, SimulationApproval
+from .logistics_routing_service import generate_logistics_options
 from .live_data_service import list_live_events as list_live_event_records
 from .location_catalog_service import load_airports, load_ports
 from .realtime_service import broadcast_event
@@ -628,65 +629,34 @@ def _build_formula_options(
 
 
 def run_route_simulation(db: Session, route) -> dict[str, object]:
-    """Run the route-level disruption simulation from stored external events."""
-
-    route_name = (
-        f"{getattr(route, 'origin_name', 'Origin')} → {getattr(route, 'destination_name', 'Destination')}"
-        if getattr(route, "origin_name", None) and getattr(route, "destination_name", None)
-        else f"Route {getattr(route, 'route_id', 'fallback')}"
-    )
+    """Generate deterministic full-journey logistics routing options."""
 
     try:
         context = _resolve_route_context(db, route)
-        route_name = context.route_name
         if context.distance_km <= 0:
             raise ValueError("Invalid route data")
-
-        try:
-            external_events = db.query(Disruption).all()
-        except Exception:
-            logger.exception("Failed to load external events for simulation")
-            external_events = []
-
-        route_events = _analyze_route_events(context, external_events)
-        formula_metrics = _calculate_formula_metrics(
-            distance_km=context.distance_km,
-            disruption_type=route.disruption_type,
+        route_name_parts = context.route_name.split(" → ", maxsplit=1)
+        origin_name = route_name_parts[0] if len(route_name_parts) == 2 else "Origin"
+        destination_name = route_name_parts[1] if len(route_name_parts) == 2 else "Destination"
+        result = generate_logistics_options(
+            origin_name=origin_name,
+            origin_lat=context.source_lat,
+            origin_lng=context.source_lng,
+            destination_name=destination_name,
+            destination_lat=context.dest_lat,
+            destination_lng=context.dest_lng,
+            priority=context.priority,
+            cargo_type=context.cargo_type,
         )
-
-        options = _build_formula_options(
-            context=context,
-            formula_metrics=formula_metrics,
-            explanations=route_events["explanations"],
-            nearby_events=route_events["nearby_events"],
-        )
-        if not options:
-            logger.warning("Simulation produced no options for route %s; returning fallback", route_name)
-            return build_deterministic_simulation_response(
-                route,
-                detail="Deterministic route generated because live simulation data was unavailable.",
-            )
-
-        best_option = min(options, key=lambda option: option["_raw_score"])["name"]
-        serialized_options = [
-            {key: value for key, value in option.items() if not key.startswith("_")}
-            for option in options
-        ]
         payload = {
             "route_id": context.route_id,
             "route": context.route_name,
             "distance_km": context.distance_km,
-            "disruption_type": route.disruption_type,
-            "best_option": best_option,
-            "options": serialized_options,
-            "risk": next(
-                option["risk"]
-                for option in serialized_options
-                if option["name"] == best_option
-            ),
-            "explanation": route_events["explanations"],
-            "delay_days": formula_metrics["delay_days"],
-            "cost_impact_usd": formula_metrics["cost_impact_usd"],
+            "best_option": result["best_option"],
+            "options": result["options"],
+            "risk": result["risk"],
+            "risk_level": result["risk_level"],
+            "explanation": result["explanation"],
         }
 
         broadcast_event("simulation_update", payload)
@@ -695,30 +665,15 @@ def run_route_simulation(db: Session, route) -> dict[str, object]:
                 "route_update",
                 {
                     "route_id": context.route_id,
-                    "status": "high risk" if payload["risk"] == "high" else "monitored",
-                    "disruption_type": route.disruption_type,
-                    "best_option": best_option,
+                    "status": "high risk" if payload["risk"] == "high" else "best",
+                    "best_option": result["best_option"],
                 },
             )
-
         return {
+            **result,
+            "route_id": context.route_id,
             "route": context.route_name,
-            "risk": payload["risk"],
-            "total_time": next(
-                option["total_time"]
-                for option in serialized_options
-                if option["name"] == best_option
-            ),
-            "total_cost": next(
-                option["total_cost"]
-                for option in serialized_options
-                if option["name"] == best_option
-            ),
-            "explanation": route_events["explanations"],
-            "options": serialized_options,
-            "best_option": best_option,
-            "delay_days": formula_metrics["delay_days"],
-            "cost_impact_usd": formula_metrics["cost_impact_usd"],
+            "distance_km": context.distance_km,
         }
     except ValueError:
         raise

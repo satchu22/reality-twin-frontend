@@ -30,9 +30,9 @@ function generateInsight(routes: SimulationOption[]) {
       `${bestRoute.route_type} route is recommended because it balances cost and time while avoiding high-risk conditions.`,
     comparison: routes.map((route) => ({
       name: route.route_type,
-      totalTime: route.total_time,
-      totalCost: route.total_cost,
-      risk: route.risk,
+      totalTimeHours: route.total_time_hours,
+      totalCost: route.total_cost_usd,
+      risk: route.risk_level,
     })),
   };
 }
@@ -103,7 +103,7 @@ export default function AIPage() {
                   >
                     <p className="text-lg font-semibold text-white">{route.name}</p>
                     <p className="mt-3 text-sm text-slate-300">
-                      Time: {route.totalTime} days
+                      Time: {route.totalTimeHours.toFixed(1)} h / {(route.totalTimeHours / 24).toFixed(1)} d
                     </p>
                     <p className="mt-1 text-sm text-slate-300">
                       Cost: ${route.totalCost}

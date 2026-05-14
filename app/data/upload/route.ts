@@ -5,7 +5,7 @@ export async function POST(request: Request) {
 
   const response = await fetch(buildApiUrl("/upload"), {
     method: "POST",
-    body: formData,
+    body: formData as unknown as BodyInit,
   });
 
   const body = await response.text();

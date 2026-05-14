@@ -1,0 +1,12 @@
+[
+  { "code": "JFK", "name": "John F. Kennedy International Airport", "lat": 40.6413, "lng": -73.7781, "country": "United States" },
+  { "code": "LAX", "name": "Los Angeles International Airport", "lat": 33.9416, "lng": -118.4085, "country": "United States" },
+  { "code": "ORD", "name": "O'Hare International Airport", "lat": 41.9742, "lng": -87.9073, "country": "United States" },
+  { "code": "ATL", "name": "Hartsfield-Jackson Atlanta International Airport", "lat": 33.6407, "lng": -84.4277, "country": "United States" },
+  { "code": "LHR", "name": "Heathrow Airport", "lat": 51.47, "lng": -0.4543, "country": "United Kingdom" },
+  { "code": "FRA", "name": "Frankfurt Airport", "lat": 50.0379, "lng": 8.5622, "country": "Germany" },
+  { "code": "DXB", "name": "Dubai International Airport", "lat": 25.2532, "lng": 55.3657, "country": "United Arab Emirates" },
+  { "code": "SIN", "name": "Singapore Changi Airport", "lat": 1.3644, "lng": 103.9915, "country": "Singapore" },
+  { "code": "BOM", "name": "Chhatrapati Shivaji Maharaj International Airport", "lat": 19.0896, "lng": 72.8656, "country": "India" },
+  { "code": "DEL", "name": "Indira Gandhi International Airport", "lat": 28.5562, "lng": 77.1, "country": "India" }
+]

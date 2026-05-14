@@ -1,3 +1,5 @@
+import { type SimulationOption } from "@/lib/simulate";
+
 export type RealtimeNotification = {
   id: number;
   user_id: number;
@@ -12,36 +14,18 @@ export type RealtimeSimulationUpdate = {
   route_id?: number | string | null;
   route?: string;
   distance_km?: number;
+  total_time?: number;
+  total_time_hours?: number;
+  total_cost?: number;
+  total_cost_usd?: number;
   disruption_type?: string;
   best_option?: string;
   approved_option?: string;
   message?: string;
   risk?: "low" | "medium" | "high";
+  risk_level?: "low" | "medium" | "high";
   explanation?: string[];
-  options?: Array<{
-    name: string;
-    route_type: string;
-    route: string;
-    delay: number;
-    cost: number;
-    total_time: number;
-    total_cost: number;
-    risk: "low" | "medium" | "high";
-    score?: number;
-    explanation: string[];
-    event_types: Array<"weather" | "traffic" | "satellite" | "global_event">;
-    live_events_used: Array<{
-      id: number;
-      source: "weather" | "traffic" | "satellite" | "global_event";
-      event_type: string;
-      severity: "low" | "medium" | "high";
-      lat: number;
-      lng: number;
-      radius_km: number;
-      description: string;
-      confidence: number;
-    }>;
-  }>;
+  options?: SimulationOption[];
 };
 
 export type RealtimeRouteUpdate = {

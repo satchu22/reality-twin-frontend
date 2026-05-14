@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 
 import UploadComponent from "@/components/UploadComponent";
 import { geocodeLocationName, getMapboxToken } from "@/lib/mapbox";
-import { simulateRoute } from "@/lib/simulate";
+import { simulateRoute, type SimulationRequest } from "@/lib/simulate";
 
 type StoredLocation = {
   name: string;
+  lat: number;
+  lng: number;
   latitude: number;
   longitude: number;
 };
@@ -31,7 +33,9 @@ export default function UploadPage() {
     }
 
     if (!getMapboxToken()) {
-      setManualError("Mapbox token missing. Add NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN to .env.local.");
+      setManualError(
+        "Mapbox token missing. Add NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN to .env.local.",
+      );
       setManualMessage(null);
       return;
     }
@@ -42,17 +46,32 @@ export default function UploadPage() {
 
     try {
       const [origin, destination] = await Promise.all([
-        geocodeLocationName(originName),
-        geocodeLocationName(destinationName),
-      ]).catch(() => {
-        throw new Error("Location not found");
-      });
+        geocodeLocationName(originName.trim()),
+        geocodeLocationName(destinationName.trim()),
+      ]);
 
-      console.log("Geocoding success", { origin, destination });
+      const originCoords: StoredLocation = {
+        name: origin.name,
+        lat: origin.latitude,
+        lng: origin.longitude,
+        latitude: origin.latitude,
+        longitude: origin.longitude,
+      };
+
+      const destCoords: StoredLocation = {
+        name: destination.name,
+        lat: destination.latitude,
+        lng: destination.longitude,
+        latitude: destination.latitude,
+        longitude: destination.longitude,
+      };
+
+      console.log("Origin coords:", originCoords);
+      console.log("Destination coords:", destCoords);
 
       setManualMessage("Generating route options...");
 
-      const response = await simulateRoute({
+      const payload: SimulationRequest = {
         disruption_type: "weather",
         origin_name: origin.name,
         destination_name: destination.name,
@@ -60,28 +79,55 @@ export default function UploadPage() {
         origin_lng: origin.longitude,
         destination_lat: destination.latitude,
         destination_lng: destination.longitude,
-        origin_latitude: origin.latitude,
-        origin_longitude: origin.longitude,
-        destination_latitude: destination.latitude,
-        destination_longitude: destination.longitude,
-      });
+      };
 
-      console.log("Simulate response received", response);
+      console.log("SIMULATE PAYLOAD:", payload);
+
+      const response = await simulateRoute(payload);
+
+      console.log("Simulate response:", response);
+
+      if (!response?.options || response.options.length === 0) {
+        throw new Error("Simulation returned no route options.");
+      }
 
       const selectedOption =
-        response.options.find((option) => option.name === response.best_option) ??
-        response.options[0] ??
-        null;
+        response.options.find(
+          (option) =>
+            option.name === response.best_option ||
+            option.route_type === response.best_option ||
+            option.label === response.best_option,
+        ) ??
+        response.options.find((option) => option.best) ??
+        response.options[0];
+
       const historyEntry = {
         id: `route-${Date.now()}`,
         created_at: new Date().toISOString(),
         origin: origin.name,
         destination: destination.name,
-        selected_option: selectedOption?.route_type ?? response.best_option ?? "N/A",
-        total_time: selectedOption?.total_time ?? response.total_time,
-        total_cost: selectedOption?.total_cost ?? response.total_cost,
-        risk: selectedOption?.risk ?? response.risk,
+        selected_option:
+          selectedOption?.route_type ??
+          selectedOption?.name ??
+          response.best_option ??
+          "N/A",
+        total_time:
+          selectedOption?.total_time ??
+          selectedOption?.total_time_hours ??
+          response.total_time ??
+          null,
+        total_cost:
+          selectedOption?.total_cost ??
+          selectedOption?.total_cost_usd ??
+          response.total_cost ??
+          null,
+        risk:
+          selectedOption?.risk ??
+          selectedOption?.risk_level ??
+          response.risk ??
+          null,
       };
+
       const previousHistory =
         typeof window !== "undefined"
           ? JSON.parse(sessionStorage.getItem("routeHistory") ?? "[]")
@@ -89,21 +135,23 @@ export default function UploadPage() {
 
       sessionStorage.setItem("routeOptions", JSON.stringify(response.options));
       sessionStorage.setItem("routeSimulation", JSON.stringify(response));
-      sessionStorage.setItem("origin", JSON.stringify(origin satisfies StoredLocation));
+      sessionStorage.setItem("origin", JSON.stringify(originCoords));
+      sessionStorage.setItem("destination", JSON.stringify(destCoords));
       sessionStorage.setItem(
-        "destination",
-        JSON.stringify(destination satisfies StoredLocation),
+        "routeHistory",
+        JSON.stringify([historyEntry, ...previousHistory]),
       );
-      sessionStorage.setItem("routeHistory", JSON.stringify([historyEntry, ...previousHistory]));
 
-      console.log("Routes saved");
+      console.log("Saved to sessionStorage");
 
       setManualMessage("Opening map...");
       router.push("/map");
     } catch (error) {
       console.error("Generate route failed", error);
       setManualError(
-        error instanceof Error ? error.message : "Simulation failed. Please try again.",
+        error instanceof Error
+          ? error.message
+          : "Simulation failed. Please try again.",
       );
       setManualMessage(null);
     } finally {
@@ -126,9 +174,12 @@ export default function UploadPage() {
 
           <section className="rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl backdrop-blur">
             <div className="mb-6">
-              <h2 className="text-2xl font-semibold text-white">Manual Entry</h2>
+              <h2 className="text-2xl font-semibold text-white">
+                Manual Entry
+              </h2>
               <p className="mt-2 text-sm text-slate-400">
-                Enter place names and RealityTwin will geocode them before opening the map.
+                Enter place names and RealityTwin will geocode them before opening
+                the map.
               </p>
             </div>
 

@@ -24,10 +24,22 @@ export type SimulationRequest = {
 
 export type DecisionOption = {
   name: string;
-  delay: number;
-  cost: number;
+  delay?: number;
+  cost?: number;
+  route_type?: string;
+  total_time_hours?: number;
+  total_cost_usd?: number;
   risk: "low" | "medium" | "high";
   score: number;
+  steps?: Array<{
+    mode: "road" | "air" | "sea" | "handling";
+    from: string;
+    to: string;
+    purpose: string;
+    distance_km: number;
+    time_hours: number;
+    cost_usd: number;
+  }>;
 };
 
 export type SimulationResponse = {
