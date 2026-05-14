@@ -4,7 +4,7 @@ import AIInsights from "@/components/AIInsights";
 import DecisionCards, { type DecisionOption } from "@/components/DecisionCards";
 
 export type SelectedRoute = {
-  routeId: number;
+  routeId: number | string | null;
   name: string;
   distance: number | null;
   status: "best" | "high risk" | "medium risk" | "normal";
@@ -96,7 +96,7 @@ export default function RoutePanel({
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-950/40 border-t-slate-950" />
           )}
           <span>
-            {simulationLoading ? "Generating logistics routes..." : "Generate Logistics Routes"}
+            {simulationLoading ? "Generating simulation..." : "Generate Simulation"}
           </span>
         </button>
 
@@ -116,7 +116,7 @@ export default function RoutePanel({
           <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4">
             <p className="text-sm text-slate-300">Decision Options</p>
             <p className="mt-2 text-lg font-semibold text-white">
-              {bestOptionName ? `Best option: ${bestOptionName}` : "Generate the top logistics route options."}
+              {bestOptionName ? `Best option: ${bestOptionName}` : "Generate simulation options for this route."}
             </p>
           </div>
 
@@ -131,7 +131,7 @@ export default function RoutePanel({
             onApproveDecision={onApprove}
             approvalLoading={approvalLoading}
             approvedOptionName={approvedOptionName}
-            emptyMessage="No route options yet. Select this route and generate logistics routing options."
+            emptyMessage="No route options yet. Generate simulation options for this route."
           />
         </div>
       </div>

@@ -67,20 +67,20 @@ export default function MapRouteDetails({
 
                 <div className="mt-3 grid gap-2 text-xs text-slate-300">
                   <div className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2">
-                  <span>total_time_hours</span>
-                  <span className="font-medium text-white">
-                    {formatHours(route.total_time_hours)}
-                  </span>
+                    <span>Total Time</span>
+                    <span className="font-medium text-white">
+                      {formatHours(route.total_time_hours)}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2">
-                  <span>total_cost_usd</span>
-                  <span className="font-medium text-white">
-                    {formatCurrency(route.total_cost_usd)}
-                  </span>
+                    <span>Total Cost</span>
+                    <span className="font-medium text-white">
+                      {formatCurrency(route.total_cost_usd)}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2">
-                  <span>risk_level</span>
-                  <span className="font-medium capitalize text-white">{route.risk_level}</span>
+                    <span>Risk Level</span>
+                    <span className="font-medium capitalize text-white">{route.risk_level}</span>
                   </div>
                 </div>
             </article>

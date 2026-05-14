@@ -23,6 +23,18 @@ export default function UploadPage() {
   const [manualError, setManualError] = useState<string | null>(null);
   const [manualMessage, setManualMessage] = useState<string | null>(null);
 
+  function clearManualRouteSession() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    sessionStorage.removeItem("routeOptions");
+    sessionStorage.removeItem("routeSimulation");
+    sessionStorage.removeItem("origin");
+    sessionStorage.removeItem("destination");
+    sessionStorage.setItem("routeMode", "batch");
+  }
+
   async function handleGenerateRoute() {
     console.log("Generate clicked");
 
@@ -45,6 +57,15 @@ export default function UploadPage() {
     setManualMessage("Converting location names to coordinates...");
 
     try {
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem("routeOptions");
+        sessionStorage.removeItem("routeSimulation");
+        sessionStorage.removeItem("origin");
+        sessionStorage.removeItem("destination");
+        sessionStorage.setItem("routeMode", "manual");
+        window.localStorage.removeItem("selected_batch");
+      }
+
       const [origin, destination] = await Promise.all([
         geocodeLocationName(originName.trim()),
         geocodeLocationName(destinationName.trim()),
@@ -170,7 +191,7 @@ export default function UploadPage() {
         </div>
 
         <div className="grid gap-8 lg:grid-cols-2">
-          <UploadComponent />
+          <UploadComponent onUploadSuccess={clearManualRouteSession} />
 
           <section className="rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl backdrop-blur">
             <div className="mb-6">
@@ -216,10 +237,10 @@ export default function UploadPage() {
                 disabled={manualLoading}
                 className="flex w-full items-center justify-center gap-3 rounded-xl bg-cyan-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {manualLoading && (
+              {manualLoading && (
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-950/40 border-t-slate-950" />
                 )}
-                <span>{manualLoading ? "Generating..." : "Generate Route"}</span>
+                <span>{manualLoading ? "Generating..." : "Generate Simulation"}</span>
               </button>
             </div>
           </section>

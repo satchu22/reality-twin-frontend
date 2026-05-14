@@ -184,7 +184,9 @@ export async function approveSimulationDecision(
   scenarioId: number | string,
   selectedOption: string,
 ): Promise<SimulationApprovalResponse> {
-  const response = await fetch(buildApiUrl(`/simulate/${scenarioId}/approve`), {
+  const response = await fetch(
+    buildApiUrl(`/simulate/${encodeURIComponent(String(scenarioId))}/approve`),
+    {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -192,7 +194,8 @@ export async function approveSimulationDecision(
     body: JSON.stringify({
       selected_option: selectedOption,
     }),
-  });
+    },
+  );
 
   if (!response.ok) {
     let errorMessage = "Decision approval failed";
