@@ -15,6 +15,7 @@ import { fetchRoutes, type RouteRecord } from "@/lib/routes";
 import {
   approveSimulationDecision,
   simulateRoute,
+  type SimulationMode,
   type SimulationResponse,
   type SimulationOption,
 } from "@/lib/simulate";
@@ -321,8 +322,11 @@ function MapPageContent() {
   const [simulationError, setSimulationError] = useState<string | null>(null);
   const [confirmationMessage, setConfirmationMessage] = useState<string | null>(null);
   const [approvedOptionName, setApprovedOptionName] = useState<string | null>(null);
+  const [focusedOptionName, setFocusedOptionName] = useState<string | null>(null);
   const [storedOrigin, setStoredOrigin] = useState<StoredLocation | null>(null);
   const [storedDestination, setStoredDestination] = useState<StoredLocation | null>(null);
+  const [selectedSimulationMode, setSelectedSimulationMode] =
+    useState<SimulationMode>("road");
   const [routeMode, setRouteMode] = useState<RouteMode>("batch");
   const [storageReady, setStorageReady] = useState(false);
 
@@ -356,9 +360,6 @@ function MapPageContent() {
     : [];
 
   // The map instance is initialized once and torn down on unmount.
-   
-   
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const parsedRoutes = parseStoredItem<SimulationOption[]>("routeOptions");
     const parsedOrigin = parseStoredItem<StoredLocation>("origin");
@@ -383,6 +384,9 @@ function MapPageContent() {
 
     if (parsedSimulation) {
       if (Array.isArray(parsedSimulation.options) && parsedSimulation.options.length > 0) {
+        if (parsedSimulation.selected_mode) {
+          setSelectedSimulationMode(parsedSimulation.selected_mode);
+        }
         setSimulationResult(parsedSimulation);
         setStorageReady(true);
         return;
@@ -399,6 +403,9 @@ function MapPageContent() {
       const bestOption = [...parsedRoutes].sort(
         (left, right) => (left.score ?? Number.POSITIVE_INFINITY) - (right.score ?? Number.POSITIVE_INFINITY),
       )[0];
+      if (bestOption?.mode) {
+        setSelectedSimulationMode(bestOption.mode);
+      }
 
       setSimulationResult({
         route:
@@ -595,6 +602,22 @@ function MapPageContent() {
     return colorMap;
   }
 
+  function fitMapToCoordinates(coordinates: [number, number][]) {
+    const map = mapRef.current;
+    if (!map || coordinates.length < 2) {
+      return;
+    }
+
+    const bounds = new mapboxgl.LngLatBounds();
+    for (const coordinate of coordinates) {
+      bounds.extend(coordinate);
+    }
+
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 80, maxZoom: 8 });
+    }
+  }
+
   function applyDecisionRouteSelection(optionName: string | null) {
     const map = mapRef.current;
     if (!map) {
@@ -617,6 +640,8 @@ function MapPageContent() {
         }
       }
     }
+
+    setFocusedOptionName(optionName);
   }
 
   const drawDecisionRouteOverlays = useEffectEvent(async (options: SimulationOption[]) => {
@@ -762,7 +787,7 @@ function MapPageContent() {
             .setHTML(
               `
                 <div style="min-width: 240px; color: #0f172a;">
-                  <div style="font-weight: 700; margin-bottom: 8px; text-transform: capitalize;">${option.route_type}</div>
+                  <div style="font-weight: 700; margin-bottom: 8px;">${option.name}</div>
                   <div>Total Time: ${option.total_time_hours.toFixed(1)} hours</div>
                   <div>Total Cost: $${option.total_cost_usd}</div>
                   <div>Risk: ${option.risk_level}</div>
@@ -791,9 +816,15 @@ function MapPageContent() {
     }
 
     decisionOverlaysRef.current = overlays;
-    applyDecisionRouteSelection(sortedOptions[0]?.name ?? null);
+    const nextFocusedName =
+      focusedOptionName && sortedOptions.some((option) => option.name === focusedOptionName)
+        ? focusedOptionName
+        : findBestOption(sortedOptions, simulationResult?.best_option ?? null)?.name ?? null;
+    applyDecisionRouteSelection(nextFocusedName);
 
-    const bestOption = findBestOption(sortedOptions, simulationResult?.best_option ?? null);
+    const bestOption =
+      sortedOptions.find((option) => option.name === nextFocusedName) ??
+      findBestOption(sortedOptions, simulationResult?.best_option ?? null);
     activeRouteGeometryRef.current = bestOption?.geometry ?? [];
     refreshVisibleEvents();
 
@@ -894,7 +925,7 @@ function MapPageContent() {
   });
 
   // `loadRoutes` and `loadManualRouteOverlay` are useEffectEvent handlers.
-   
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     if (!mapboxToken) {
       console.warn("Map disabled. Please configure Mapbox token.");
@@ -1075,9 +1106,10 @@ const map = new mapboxgl.Map({
       mapRef.current = null;
     };
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // `loadManualRouteOverlay` and `loadRoutes` are useEffectEvent handlers.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     if (!storageReady || !mapLoadedRef.current) {
       return;
@@ -1106,9 +1138,9 @@ const map = new mapboxgl.Map({
     simulationResult,
     storageReady,
   ]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // `loadEvents` is a useEffectEvent handler.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!storageReady || !mapLoadedRef.current) {
       return;
@@ -1118,7 +1150,6 @@ const map = new mapboxgl.Map({
   }, [isManualMode, storageReady]);
 
   // `loadRoutes` and `loadEvents` are useEffectEvent handlers.
-   
   useEffect(() => {
     if (!storageReady) {
       return;
@@ -1128,15 +1159,28 @@ const map = new mapboxgl.Map({
   }, [isManualMode, storageReady]);
 
   // `refreshVisibleEvents` is driven by refs plus current toggle state.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     refreshVisibleEvents();
   }, [isManualMode, showLiveEvents]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // `loadRoutes` and `loadEvents` are useEffectEvent handlers.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!isManualMode || !storageReady) {
+      return;
+    }
+
+    const currentManualRoute = formatManualRouteName(originName, destName);
+    if (
+      simulationResult &&
+      simulationResult.route &&
+      simulationResult.route !== currentManualRoute
+    ) {
+      setSimulationResult(null);
+      setApprovedOptionName(null);
+      setFocusedOptionName(null);
+      removeDecisionRouteOverlays();
       return;
     }
 
@@ -1149,7 +1193,7 @@ const map = new mapboxgl.Map({
 
     setSelectedRoute({
       routeId: simulationResult?.route_id ?? null,
-      name: simulationResult?.route ?? manualRouteName,
+      name: simulationResult?.route ?? currentManualRoute,
       distance: Number.isFinite(derivedDistance) ? Number(derivedDistance.toFixed(1)) : null,
       status:
         simulationResult?.risk === "high"
@@ -1160,8 +1204,10 @@ const map = new mapboxgl.Map({
     });
     setIsRoutePanelOpen(true);
   }, [
+    destName,
     destLat,
     destLng,
+    originName,
     isManualMode,
     manualRouteName,
     originLat,
@@ -1266,7 +1312,7 @@ const map = new mapboxgl.Map({
     void drawDecisionRouteOverlays(simulationResult.options);
   }, [simulationResult]);
 
-  async function handleSimulateDisruption() {
+  async function handleSimulateDisruption(modeOverride?: SimulationMode) {
     if (!selectedRoute || simulationLoading) {
       return;
     }
@@ -1280,12 +1326,17 @@ const map = new mapboxgl.Map({
     setSimulationError(null);
     setConfirmationMessage(null);
     setApprovedOptionName(null);
+    setFocusedOptionName(null);
+    removeDecisionRouteOverlays();
 
     try {
+      const simulationMode = modeOverride ?? selectedSimulationMode;
+      setSelectedSimulationMode(simulationMode);
       const result = await simulateRoute(
         isManualMode
           ? {
               disruption_type: "weather",
+              selected_mode: simulationMode,
               origin_name: originName ?? "Origin",
               destination_name: destName ?? "Destination",
               origin_lat: originLat as number,
@@ -1298,8 +1349,18 @@ const map = new mapboxgl.Map({
                 typeof selectedRoute.routeId === "number" ? selectedRoute.routeId : undefined,
               distance_km: selectedRoute.distance ?? undefined,
               disruption_type: "weather",
+              selected_mode: simulationMode,
             },
       );
+
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("routeOptions", JSON.stringify(result.options));
+        sessionStorage.setItem("routeSimulation", JSON.stringify(result));
+      }
+
+      if (result.selected_mode) {
+        setSelectedSimulationMode(result.selected_mode);
+      }
 
       if (!isManualMode) {
         const updatedFeatures = routesDataRef.current.features.map<RouteFeature>((feature) => {
@@ -1331,7 +1392,7 @@ const map = new mapboxgl.Map({
         currentRoute
           ? {
               ...currentRoute,
-              status: "high risk",
+              status: result.risk === "high" ? "high risk" : "best",
             }
           : currentRoute,
       );
@@ -1345,6 +1406,11 @@ const map = new mapboxgl.Map({
     } finally {
       setSimulationLoading(false);
     }
+  }
+
+  function handleSelectSimulationMode(mode: SimulationMode) {
+    setSelectedSimulationMode(mode);
+    void handleSimulateDisruption(mode);
   }
 
   async function handleApproveDecision(option: DecisionOption) {
@@ -1370,6 +1436,13 @@ const map = new mapboxgl.Map({
     } finally {
       setApprovalLoading(false);
     }
+  }
+
+  function handleViewOption(option: DecisionOption) {
+    applyDecisionRouteSelection(option.name);
+    activeRouteGeometryRef.current = option.geometry ?? [];
+    fitMapToCoordinates(option.geometry ?? []);
+    refreshVisibleEvents();
   }
 
   function handleClosePanel() {
@@ -1404,7 +1477,7 @@ const map = new mapboxgl.Map({
           <p className="text-sm font-semibold text-cyan-300">Route Workflow</p>
           <p className="mt-1 text-sm text-slate-300">
             {isManualMode
-              ? "Generate simulation options for the current route and review the best path for this origin and destination."
+              ? "Select Road, Air, Sea, or Hybrid to generate clean simulation options for the current origin and destination."
               : "Click a route to open details, generate simulation options, and approve the best decision."}
           </p>
         </div>
@@ -1484,9 +1557,9 @@ const map = new mapboxgl.Map({
           </div>
         )}
 
-        {!hasManualRoute && (
+        {!isManualMode && !routesLoading && routesDataRef.current.features.length === 0 && (
           <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
-            No route data found. Please simulate first.
+            No route data found. Upload a batch or enter a manual route first.
           </div>
         )}
 
@@ -1519,9 +1592,12 @@ const map = new mapboxgl.Map({
         detectedEvents={detectedEvents}
         bestOptionName={simulationResult?.best_option ?? null}
         approvedOptionName={approvedOptionName}
+        selectedMode={selectedSimulationMode}
         onClose={handleClosePanel}
-        onSimulate={handleSimulateDisruption}
+        onSimulate={() => void handleSimulateDisruption()}
+        onSelectMode={handleSelectSimulationMode}
         onApprove={handleApproveDecision}
+        onViewOption={handleViewOption}
       />
     </div>
   );

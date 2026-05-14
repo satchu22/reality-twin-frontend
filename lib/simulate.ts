@@ -6,10 +6,13 @@ export type DisruptionType =
   | "congestion"
   | "breakdown";
 
+export type SimulationMode = "road" | "air" | "sea" | "hybrid";
+
 export type SimulationRequest = {
   route_id?: number | string;
   distance_km?: number;
   disruption_type: DisruptionType;
+  selected_mode?: SimulationMode;
   origin_name?: string;
   origin_lat?: number;
   origin_lng?: number;
@@ -32,26 +35,38 @@ export type SimulationStep = {
   distance_km: number;
   time_hours: number;
   cost_usd: number;
+  risk_score?: number;
   geometry: [number, number][];
 };
 
 export type SimulationOption = {
+  id?: string;
   name: string;
   label?: string;
+  mode: SimulationMode;
+  mode_sequence: SimulationMode[] | Array<"road" | "air" | "sea">;
   route_type: string;
   route: string;
+  origin?: string;
+  destination?: string;
   geometry?: [number, number][];
   handling_points?: [number, number][];
+  legs: SimulationStep[];
   steps: SimulationStep[];
   delay?: number;
   cost?: number;
   total_time: number;
   total_cost: number;
+  total_distance_km?: number;
   total_time_hours: number;
   total_cost_usd: number;
+  estimated_time_hours?: number;
+  estimated_cost_usd?: number;
+  recommendation_reason: string;
   risk: "low" | "medium" | "high";
   risk_level: "low" | "medium" | "high";
   risk_score: number;
+  overall_risk_score?: number;
   score: number;
   best?: boolean;
   explanation: string[];
@@ -72,11 +87,15 @@ export type SimulationOption = {
 };
 
 export type SimulationResponse = {
+  origin?: string;
+  destination?: string;
+  selected_mode?: SimulationMode;
   route: string;
   route_id?: number | string;
   distance_km?: number;
   total_time_hours?: number;
   total_cost_usd?: number;
+  risk_score?: number;
   total_time: number;
   total_cost: number;
   risk: "low" | "medium" | "high";

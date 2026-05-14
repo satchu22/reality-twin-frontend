@@ -53,9 +53,9 @@ export default function MapRouteDetails({
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-semibold capitalize text-white">{route.route_type}</p>
+                  <p className="font-semibold text-white">{route.name}</p>
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                    {route.name}
+                    {route.mode}
                   </p>
                 </div>
                 {isBest && (

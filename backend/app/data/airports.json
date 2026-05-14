@@ -1,12 +1,18 @@
 [
+  { "code": "SFO", "name": "San Francisco International Airport", "lat": 37.6213, "lng": -122.379, "country": "United States" },
+  { "code": "OAK", "name": "Oakland International Airport", "lat": 37.7126, "lng": -122.2197, "country": "United States" },
+  { "code": "SJC", "name": "San Jose Mineta International Airport", "lat": 37.3639, "lng": -121.9289, "country": "United States" },
   { "code": "JFK", "name": "John F. Kennedy International Airport", "lat": 40.6413, "lng": -73.7781, "country": "United States" },
+  { "code": "EWR", "name": "Newark Liberty International Airport", "lat": 40.6895, "lng": -74.1745, "country": "United States" },
+  { "code": "LGA", "name": "LaGuardia Airport", "lat": 40.7769, "lng": -73.874, "country": "United States" },
   { "code": "LAX", "name": "Los Angeles International Airport", "lat": 33.9416, "lng": -118.4085, "country": "United States" },
+  { "code": "SEA", "name": "Seattle-Tacoma International Airport", "lat": 47.4502, "lng": -122.3088, "country": "United States" },
   { "code": "ORD", "name": "O'Hare International Airport", "lat": 41.9742, "lng": -87.9073, "country": "United States" },
+  { "code": "DFW", "name": "Dallas Fort Worth International Airport", "lat": 32.8998, "lng": -97.0403, "country": "United States" },
   { "code": "ATL", "name": "Hartsfield-Jackson Atlanta International Airport", "lat": 33.6407, "lng": -84.4277, "country": "United States" },
+  { "code": "MIA", "name": "Miami International Airport", "lat": 25.7959, "lng": -80.2871, "country": "United States" },
   { "code": "LHR", "name": "Heathrow Airport", "lat": 51.47, "lng": -0.4543, "country": "United Kingdom" },
   { "code": "FRA", "name": "Frankfurt Airport", "lat": 50.0379, "lng": 8.5622, "country": "Germany" },
   { "code": "DXB", "name": "Dubai International Airport", "lat": 25.2532, "lng": 55.3657, "country": "United Arab Emirates" },
-  { "code": "SIN", "name": "Singapore Changi Airport", "lat": 1.3644, "lng": 103.9915, "country": "Singapore" },
-  { "code": "BOM", "name": "Chhatrapati Shivaji Maharaj International Airport", "lat": 19.0896, "lng": 72.8656, "country": "India" },
-  { "code": "DEL", "name": "Indira Gandhi International Airport", "lat": 28.5562, "lng": 77.1, "country": "India" }
+  { "code": "SIN", "name": "Singapore Changi Airport", "lat": 1.3644, "lng": 103.9915, "country": "Singapore" }
 ]

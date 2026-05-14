@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 
 import UploadComponent from "@/components/UploadComponent";
 import { geocodeLocationName, getMapboxToken } from "@/lib/mapbox";
-import { simulateRoute, type SimulationRequest } from "@/lib/simulate";
 
 type StoredLocation = {
   name: string;
@@ -90,78 +89,10 @@ export default function UploadPage() {
       console.log("Origin coords:", originCoords);
       console.log("Destination coords:", destCoords);
 
-      setManualMessage("Generating route options...");
+      setManualMessage("Saving route context...");
 
-      const payload: SimulationRequest = {
-        disruption_type: "weather",
-        origin_name: origin.name,
-        destination_name: destination.name,
-        origin_lat: origin.latitude,
-        origin_lng: origin.longitude,
-        destination_lat: destination.latitude,
-        destination_lng: destination.longitude,
-      };
-
-      console.log("SIMULATE PAYLOAD:", payload);
-
-      const response = await simulateRoute(payload);
-
-      console.log("Simulate response:", response);
-
-      if (!response?.options || response.options.length === 0) {
-        throw new Error("Simulation returned no route options.");
-      }
-
-      const selectedOption =
-        response.options.find(
-          (option) =>
-            option.name === response.best_option ||
-            option.route_type === response.best_option ||
-            option.label === response.best_option,
-        ) ??
-        response.options.find((option) => option.best) ??
-        response.options[0];
-
-      const historyEntry = {
-        id: `route-${Date.now()}`,
-        created_at: new Date().toISOString(),
-        origin: origin.name,
-        destination: destination.name,
-        selected_option:
-          selectedOption?.route_type ??
-          selectedOption?.name ??
-          response.best_option ??
-          "N/A",
-        total_time:
-          selectedOption?.total_time ??
-          selectedOption?.total_time_hours ??
-          response.total_time ??
-          null,
-        total_cost:
-          selectedOption?.total_cost ??
-          selectedOption?.total_cost_usd ??
-          response.total_cost ??
-          null,
-        risk:
-          selectedOption?.risk ??
-          selectedOption?.risk_level ??
-          response.risk ??
-          null,
-      };
-
-      const previousHistory =
-        typeof window !== "undefined"
-          ? JSON.parse(sessionStorage.getItem("routeHistory") ?? "[]")
-          : [];
-
-      sessionStorage.setItem("routeOptions", JSON.stringify(response.options));
-      sessionStorage.setItem("routeSimulation", JSON.stringify(response));
       sessionStorage.setItem("origin", JSON.stringify(originCoords));
       sessionStorage.setItem("destination", JSON.stringify(destCoords));
-      sessionStorage.setItem(
-        "routeHistory",
-        JSON.stringify([historyEntry, ...previousHistory]),
-      );
 
       console.log("Saved to sessionStorage");
 
@@ -237,10 +168,12 @@ export default function UploadPage() {
                 disabled={manualLoading}
                 className="flex w-full items-center justify-center gap-3 rounded-xl bg-cyan-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
-              {manualLoading && (
+                {manualLoading && (
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-950/40 border-t-slate-950" />
                 )}
-                <span>{manualLoading ? "Generating..." : "Generate Simulation"}</span>
+                <span>
+                  {manualLoading ? "Generating..." : "Generate Simulation"}
+                </span>
               </button>
             </div>
           </section>

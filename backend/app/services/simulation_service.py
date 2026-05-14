@@ -17,10 +17,10 @@ from sqlalchemy.orm import Session
 from ..models.event import Disruption
 from ..models.route import Batch, Route
 from ..models.scenario import Simulation, SimulationApproval
-from .logistics_routing_service import generate_logistics_options
 from .live_data_service import list_live_events as list_live_event_records
 from .location_catalog_service import load_airports, load_ports
 from .realtime_service import broadcast_event
+from ..simulations.logistics.multimodal_router import generate_mode_simulation
 
 logger = logging.getLogger(__name__)
 
@@ -638,20 +638,20 @@ def run_route_simulation(db: Session, route) -> dict[str, object]:
         route_name_parts = context.route_name.split(" → ", maxsplit=1)
         origin_name = route_name_parts[0] if len(route_name_parts) == 2 else "Origin"
         destination_name = route_name_parts[1] if len(route_name_parts) == 2 else "Destination"
-        result = generate_logistics_options(
+        result = generate_mode_simulation(
             origin_name=origin_name,
             origin_lat=context.source_lat,
             origin_lng=context.source_lng,
             destination_name=destination_name,
             destination_lat=context.dest_lat,
             destination_lng=context.dest_lng,
-            priority=context.priority,
-            cargo_type=context.cargo_type,
+            selected_mode=getattr(route, "selected_mode", "road"),
         )
         payload = {
             "route_id": context.route_id,
             "route": context.route_name,
             "distance_km": context.distance_km,
+            "selected_mode": result["selected_mode"],
             "best_option": result["best_option"],
             "options": result["options"],
             "risk": result["risk"],

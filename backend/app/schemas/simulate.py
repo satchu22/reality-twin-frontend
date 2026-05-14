@@ -13,6 +13,7 @@ class RouteSimulationRequest(BaseModel):
     route_id: int | None = Field(default=None, validation_alias=AliasChoices("route_id", "id"))
     distance_km: float | None = Field(default=None, gt=0)
     disruption_type: str = "weather"
+    selected_mode: Literal["road", "air", "sea", "hybrid"] = "road"
     origin_name: str | None = None
     origin_latitude: float | None = Field(
         default=None,

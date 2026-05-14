@@ -6,6 +6,7 @@ type DecisionCardsProps = {
   options: DecisionOption[];
   bestOptionName?: string | null;
   onApproveDecision?: (option: DecisionOption) => void;
+  onViewOption?: (option: DecisionOption) => void;
   approvalLoading?: boolean;
   approvedOptionName?: string | null;
   emptyMessage?: string;
@@ -28,6 +29,7 @@ export default function DecisionCards({
   options,
   bestOptionName,
   onApproveDecision,
+  onViewOption,
   approvalLoading = false,
   approvedOptionName = null,
   emptyMessage = "No decision options available.",
@@ -57,11 +59,9 @@ export default function DecisionCards({
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-xl font-semibold capitalize text-white">
-                  {option.route_type}
-                </h3>
+                <h3 className="text-xl font-semibold text-white">{option.name}</h3>
                 <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-400">
-                  {option.label ?? option.name}
+                  {option.mode}
                 </p>
               </div>
 
@@ -98,11 +98,6 @@ export default function DecisionCards({
                 <span className="text-slate-400">Risk Score</span>
                 <span className="font-medium text-white">{option.risk_score}</span>
               </div>
-
-              <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
-                <span className="text-slate-400">Score</span>
-                <span className="font-medium text-white">{option.score.toFixed(3)}</span>
-              </div>
             </div>
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
@@ -110,9 +105,7 @@ export default function DecisionCards({
                 Why Recommended
               </p>
               <div className="mt-3 space-y-2 text-sm text-slate-300">
-                {option.explanations.map((line) => (
-                  <p key={`${option.name}-${line}`}>• {line}</p>
-                ))}
+                <p>{option.recommendation_reason}</p>
               </div>
             </div>
 
@@ -121,7 +114,7 @@ export default function DecisionCards({
                 Route Chain
               </p>
               <div className="mt-3 space-y-3">
-                {option.steps.map((step, index) => (
+                {option.legs.map((step, index) => (
                   <div
                     key={`${option.name}-${step.mode}-${index}`}
                     className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300"
@@ -147,18 +140,28 @@ export default function DecisionCards({
               </div>
             </div>
 
-            <button
-              type="button"
-              disabled={approvalLoading || isApproved}
-              onClick={() => onApproveDecision?.(option)}
-              className="mt-6 w-full rounded-2xl border border-cyan-300/20 bg-cyan-400 px-4 py-3 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-60"
-            >
-              {approvalLoading
-                ? "Approving..."
-                : isApproved
-                  ? "Approved"
-                  : "Approve Decision"}
-            </button>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => onViewOption?.(option)}
+                className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 font-semibold text-white transition hover:bg-white/10"
+              >
+                View On Map
+              </button>
+
+              <button
+                type="button"
+                disabled={approvalLoading || isApproved}
+                onClick={() => onApproveDecision?.(option)}
+                className="w-full rounded-2xl border border-cyan-300/20 bg-cyan-400 px-4 py-3 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-60"
+              >
+                {approvalLoading
+                  ? "Approving..."
+                  : isApproved
+                    ? "Approved"
+                    : "Approve Decision"}
+              </button>
+            </div>
           </article>
         );
       })}

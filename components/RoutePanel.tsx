@@ -2,6 +2,7 @@
 
 import AIInsights from "@/components/AIInsights";
 import DecisionCards, { type DecisionOption } from "@/components/DecisionCards";
+import { type SimulationMode } from "@/lib/simulate";
 
 export type SelectedRoute = {
   routeId: number | string | null;
@@ -21,10 +22,40 @@ type RoutePanelProps = {
   detectedEvents: DecisionOption["live_events_used"];
   bestOptionName: string | null;
   approvedOptionName: string | null;
+  selectedMode: SimulationMode;
   onClose: () => void;
   onSimulate: () => void;
+  onSelectMode: (mode: SimulationMode) => void;
   onApprove: (option: DecisionOption) => void;
+  onViewOption: (option: DecisionOption) => void;
 };
+
+const MODE_CARDS: Array<{
+  mode: SimulationMode;
+  title: string;
+  description: string;
+}> = [
+  {
+    mode: "road",
+    title: "Road",
+    description: "Compare fastest, cheapest, and safest trucking paths.",
+  },
+  {
+    mode: "air",
+    title: "Air",
+    description: "Simulate airport pickup, linehaul, and final delivery.",
+  },
+  {
+    mode: "sea",
+    title: "Sea",
+    description: "Model port drayage, ocean linehaul, and final-mile delivery.",
+  },
+  {
+    mode: "hybrid",
+    title: "Hybrid",
+    description: "Blend multiple modes to optimize time, cost, and risk.",
+  },
+];
 
 export default function RoutePanel({
   route,
@@ -37,9 +68,12 @@ export default function RoutePanel({
   detectedEvents,
   bestOptionName,
   approvedOptionName,
+  selectedMode,
   onClose,
   onSimulate,
+  onSelectMode,
   onApprove,
+  onViewOption,
 }: RoutePanelProps) {
   if (!route || !isOpen) {
     return null;
@@ -83,6 +117,33 @@ export default function RoutePanel({
             {route.status}
           </p>
         </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <p className="text-sm text-slate-400">Simulation Mode</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {MODE_CARDS.map((modeCard) => {
+              const isSelected = selectedMode === modeCard.mode;
+
+              return (
+                <button
+                  key={modeCard.mode}
+                  type="button"
+                  onClick={() => onSelectMode(modeCard.mode)}
+                  className={`rounded-2xl border p-4 text-left transition ${
+                    isSelected
+                      ? "border-cyan-300 bg-cyan-400/15"
+                      : "border-white/10 bg-slate-950/50 hover:bg-white/10"
+                  }`}
+                >
+                  <p className="font-semibold text-white">{modeCard.title}</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-300">
+                    {modeCard.description}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       <div className="mt-auto pt-8">
@@ -96,7 +157,9 @@ export default function RoutePanel({
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-950/40 border-t-slate-950" />
           )}
           <span>
-            {simulationLoading ? "Generating simulation..." : "Generate Simulation"}
+            {simulationLoading
+              ? "Generating simulation..."
+              : `Generate ${selectedMode[0].toUpperCase()}${selectedMode.slice(1)} Simulation`}
           </span>
         </button>
 
@@ -116,7 +179,9 @@ export default function RoutePanel({
           <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4">
             <p className="text-sm text-slate-300">Decision Options</p>
             <p className="mt-2 text-lg font-semibold text-white">
-              {bestOptionName ? `Best option: ${bestOptionName}` : "Generate simulation options for this route."}
+              {bestOptionName
+                ? `Best option: ${bestOptionName}`
+                : "Generate simulation options for this route."}
             </p>
           </div>
 
@@ -129,6 +194,7 @@ export default function RoutePanel({
             options={decisionOptions}
             bestOptionName={bestOptionName}
             onApproveDecision={onApprove}
+            onViewOption={onViewOption}
             approvalLoading={approvalLoading}
             approvedOptionName={approvedOptionName}
             emptyMessage="No route options yet. Generate simulation options for this route."
