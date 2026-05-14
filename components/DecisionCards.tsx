@@ -98,6 +98,20 @@ export default function DecisionCards({
                 <span className="text-slate-400">Risk Score</span>
                 <span className="font-medium text-white">{option.risk_score}</span>
               </div>
+
+              <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
+                <span className="text-slate-400">Weather Risk</span>
+                <span className="font-medium capitalize text-white">
+                  {option.weather_risk?.risk_level ?? "unknown"}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
+                <span className="text-slate-400">Weather Delay</span>
+                <span className="font-medium text-white">
+                  +{(option.weather_risk?.delay_hours ?? 0).toFixed(1)} h
+                </span>
+              </div>
             </div>
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
@@ -106,6 +120,15 @@ export default function DecisionCards({
               </p>
               <div className="mt-3 space-y-2 text-sm text-slate-300">
                 <p>{option.recommendation_reason}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                Weather Summary
+              </p>
+              <div className="mt-3 space-y-2 text-sm text-slate-300">
+                <p>{option.weather_risk?.summary ?? "Forecast-based estimate unavailable."}</p>
               </div>
             </div>
 

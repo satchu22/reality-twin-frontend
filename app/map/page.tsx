@@ -302,6 +302,7 @@ function MapPageContent() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const mapLoadedRef = useRef(false);
   const eventMarkersRef = useRef<mapboxgl.Marker[]>([]);
+  const weatherMarkersRef = useRef<mapboxgl.Marker[]>([]);
   const allEventsRef = useRef<LiveEvent[]>([]);
   const activeRouteGeometryRef = useRef<[number, number][]>([]);
   const routesDataRef = useRef<RouteFeatureCollection>(EMPTY_FEATURE_COLLECTION);
@@ -313,6 +314,7 @@ function MapPageContent() {
   const [isRoutePanelOpen, setIsRoutePanelOpen] = useState(false);
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
   const [showLiveEvents, setShowLiveEvents] = useState(false);
+  const [showWeatherRisk, setShowWeatherRisk] = useState(false);
   const [routesLoading, setRoutesLoading] = useState(true);
   const [routesError, setRoutesError] = useState<string | null>(null);
   const [simulationLoading, setSimulationLoading] = useState(false);
@@ -358,6 +360,10 @@ function MapPageContent() {
         ).values(),
       )
     : [];
+  const focusedOption =
+    simulationResult?.options.find((option) => option.name === focusedOptionName) ??
+    findBestOption(simulationResult?.options ?? [], simulationResult?.best_option ?? null) ??
+    null;
 
   // The map instance is initialized once and torn down on unmount.
   useEffect(() => {
@@ -461,6 +467,13 @@ function MapPageContent() {
     eventMarkersRef.current = [];
   }
 
+  function clearWeatherMarkers() {
+    for (const marker of weatherMarkersRef.current) {
+      marker.remove();
+    }
+    weatherMarkersRef.current = [];
+  }
+
   function clearManualMarkers() {
     for (const marker of manualMarkersRef.current) {
       marker.remove();
@@ -470,6 +483,7 @@ function MapPageContent() {
 
   function clearManualRouteOverlay() {
     clearManualMarkers();
+    clearWeatherMarkers();
     activeRouteGeometryRef.current = [];
 
     const source = mapRef.current?.getSource("manual-route") as
@@ -543,6 +557,36 @@ function MapPageContent() {
       return new mapboxgl.Marker({ element })
         .setLngLat([event.lng, event.lat])
         .addTo(map);
+    });
+  }
+
+  function refreshWeatherMarkers(option: SimulationOption | null) {
+    clearWeatherMarkers();
+
+    if (!showWeatherRisk || !option?.weather_risk?.sampled_locations?.length || !mapRef.current) {
+      return;
+    }
+
+    weatherMarkersRef.current = option.weather_risk.sampled_locations.map((sample) => {
+      const element = document.createElement("div");
+      element.className =
+        "h-4 w-4 rounded-full border-2 border-white shadow-lg ring-4 ring-sky-200/10";
+      element.style.backgroundColor =
+        sample.risk_score > 60 ? "#ef4444" : sample.risk_score > 25 ? "#f59e0b" : "#38bdf8";
+      element.title = `Forecast-based estimate: ${sample.summary}`;
+
+      return new mapboxgl.Marker({ element })
+        .setLngLat([sample.lng, sample.lat])
+        .setPopup(
+          new mapboxgl.Popup({ offset: 16 }).setHTML(
+            `<div style="min-width: 200px; color: #0f172a;">
+              <div style="font-weight: 700; margin-bottom: 6px;">Weather Risk</div>
+              <div style="font-size: 12px;">${sample.summary}</div>
+              <div style="margin-top: 6px; font-size: 12px; color: #334155;">Risk score: ${sample.risk_score.toFixed(1)}</div>
+            </div>`,
+          ),
+        )
+        .addTo(mapRef.current!);
     });
   }
 
@@ -827,6 +871,7 @@ function MapPageContent() {
       findBestOption(sortedOptions, simulationResult?.best_option ?? null);
     activeRouteGeometryRef.current = bestOption?.geometry ?? [];
     refreshVisibleEvents();
+    refreshWeatherMarkers(bestOption ?? null);
 
     if (!bounds.isEmpty()) {
       map.fitBounds(bounds, { padding: 80, maxZoom: 8 });
@@ -1099,6 +1144,7 @@ const map = new mapboxgl.Map({
 
     return () => {
       clearEventMarkers();
+      clearWeatherMarkers();
       clearManualRouteOverlay();
       removeDecisionRouteOverlays();
       mapLoadedRef.current = false;
@@ -1165,6 +1211,12 @@ const map = new mapboxgl.Map({
   }, [isManualMode, showLiveEvents]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
+  /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => {
+    refreshWeatherMarkers(focusedOption);
+  }, [focusedOption, showWeatherRisk]);
+  /* eslint-enable react-hooks/exhaustive-deps */
+
   // `loadRoutes` and `loadEvents` are useEffectEvent handlers.
   useEffect(() => {
     if (!isManualMode || !storageReady) {
@@ -1180,6 +1232,7 @@ const map = new mapboxgl.Map({
       setSimulationResult(null);
       setApprovedOptionName(null);
       setFocusedOptionName(null);
+      clearWeatherMarkers();
       removeDecisionRouteOverlays();
       return;
     }
@@ -1327,6 +1380,7 @@ const map = new mapboxgl.Map({
     setConfirmationMessage(null);
     setApprovedOptionName(null);
     setFocusedOptionName(null);
+    clearWeatherMarkers();
     removeDecisionRouteOverlays();
 
     try {
@@ -1443,6 +1497,7 @@ const map = new mapboxgl.Map({
     activeRouteGeometryRef.current = option.geometry ?? [];
     fitMapToCoordinates(option.geometry ?? []);
     refreshVisibleEvents();
+    refreshWeatherMarkers(option);
   }
 
   function handleClosePanel() {
@@ -1452,6 +1507,7 @@ const map = new mapboxgl.Map({
     setSimulationError(null);
     setConfirmationMessage(null);
     setApprovedOptionName(null);
+    clearWeatherMarkers();
     removeDecisionRouteOverlays();
     resetSelectionVisuals();
     clearRerouteLayer();
@@ -1502,6 +1558,28 @@ const map = new mapboxgl.Map({
               }`}
             >
               {showLiveEvents ? "On" : "Off"}
+            </button>
+          </div>
+        </div>
+
+        <div className="pointer-events-auto rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-xl backdrop-blur">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold text-white">Show Weather Risk</p>
+              <p className="mt-1 text-xs text-slate-400">
+                Forecast-based estimate markers for the current simulation only.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowWeatherRisk((currentValue) => !currentValue)}
+              className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide transition ${
+                showWeatherRisk
+                  ? "bg-sky-400 text-slate-950"
+                  : "border border-white/10 bg-white/5 text-slate-300"
+              }`}
+            >
+              {showWeatherRisk ? "On" : "Off"}
             </button>
           </div>
         </div>
@@ -1589,6 +1667,7 @@ const map = new mapboxgl.Map({
         simulationError={simulationError}
         confirmationMessage={confirmationMessage}
         decisionOptions={simulationResult?.options ?? []}
+        focusedOption={focusedOption}
         detectedEvents={detectedEvents}
         bestOptionName={simulationResult?.best_option ?? null}
         approvedOptionName={approvedOptionName}

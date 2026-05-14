@@ -17,6 +17,7 @@ from ...services.cost_engine import (
     sea_cost,
     sea_time_hours,
 )
+from ...services.air_route_engine import build_air_route_candidates
 from ...services.nearest_hub import (
     Hub,
     find_nearest_airports,
@@ -24,6 +25,8 @@ from ...services.nearest_hub import (
     haversine_distance_km,
 )
 from ...services.risk_engine import air_risk, hybrid_risk, risk_level, road_risk, sea_risk
+from ...services.sea_route_engine import build_estimated_sea_route
+from ...services.weather_risk_engine import apply_weather_risk_to_option
 
 SimulationMode = Literal["road", "air", "sea", "hybrid"]
 LegMode = Literal["road", "air", "sea"]
@@ -81,6 +84,7 @@ def _build_leg(
     risk_score: float,
     purpose: str,
     curvature: float = 0.0,
+    geometry: list[list[float]] | None = None,
 ) -> dict[str, object]:
     return {
         "mode": mode,
@@ -91,7 +95,9 @@ def _build_leg(
         "cost_usd": _round_cost(cost_usd),
         "risk_score": round(risk_score, 1),
         "purpose": purpose,
-        "geometry": _curved_geometry(source, destination, curvature=curvature),
+        "geometry": geometry
+        if geometry is not None
+        else _curved_geometry(source, destination, curvature=curvature),
     }
 
 
@@ -281,87 +287,97 @@ def _pick_unique_options(
 
 def generate_air_options(origin: Location, destination: Location) -> list[dict[str, object]]:
     candidates: list[dict[str, object]] = []
-    for origin_airport in find_nearest_airports(origin.lat, origin.lng, limit=3):
-        for destination_airport in find_nearest_airports(destination.lat, destination.lng, limit=3):
-            total_handling_cost = _round_cost(AIRPORT_HANDLING_COST_USD * 2)
-            first_distance = haversine_distance_km(origin.lat, origin.lng, origin_airport.lat, origin_airport.lng)
-            air_distance = haversine_distance_km(origin_airport.lat, origin_airport.lng, destination_airport.lat, destination_airport.lng)
-            final_distance = haversine_distance_km(destination_airport.lat, destination_airport.lng, destination.lat, destination.lng)
-            first_traffic, first_weather, first_risk = road_risk(
+    origin_airports = find_nearest_airports(origin.lat, origin.lng, limit=3)
+    destination_airports = find_nearest_airports(destination.lat, destination.lng, limit=3)
+    for candidate_pair in build_air_route_candidates(
+        origin_airports=origin_airports,
+        destination_airports=destination_airports,
+    ):
+        origin_airport = candidate_pair.origin_airport
+        destination_airport = candidate_pair.destination_airport
+        total_handling_cost = _round_cost(AIRPORT_HANDLING_COST_USD * 2)
+        first_distance = haversine_distance_km(origin.lat, origin.lng, origin_airport.lat, origin_airport.lng)
+        air_distance = haversine_distance_km(origin_airport.lat, origin_airport.lng, destination_airport.lat, destination_airport.lng)
+        final_distance = haversine_distance_km(destination_airport.lat, destination_airport.lng, destination.lat, destination.lng)
+        first_traffic, first_weather, first_risk = road_risk(
+            distance_km=first_distance,
+            traffic_bias=6.0,
+            weather_bias=4.0,
+        )
+        final_traffic, final_weather, final_risk = road_risk(
+            distance_km=final_distance,
+            traffic_bias=4.0,
+            weather_bias=4.0,
+        )
+        air_total_risk = air_risk(
+            first_road_risk=first_risk,
+            linehaul_distance_km=air_distance,
+            final_road_risk=final_risk,
+            handling_complexity=18.0,
+        )
+        legs = [
+            _build_leg(
+                mode="road",
+                source=origin,
+                destination=_hub_location(origin_airport),
                 distance_km=first_distance,
-                traffic_bias=6.0,
-                weather_bias=4.0,
-            )
-            final_traffic, final_weather, final_risk = road_risk(
+                time_hours=road_time_hours(first_distance, 1.05),
+                cost_usd=road_cost(first_distance, 1.05),
+                risk_score=first_risk,
+                purpose=f"Road pickup to airport ({origin_airport.code})",
+            ),
+            _build_leg(
+                mode="air",
+                source=_hub_location(origin_airport),
+                destination=_hub_location(destination_airport),
+                distance_km=air_distance,
+                time_hours=air_time_hours(air_distance, 8.0),
+                cost_usd=air_cost(air_distance, total_handling_cost),
+                risk_score=air_total_risk,
+                purpose=(
+                    f"Estimated air freight from {origin_airport.code} "
+                    f"to {destination_airport.code}"
+                ),
+                curvature=0.06,
+            ),
+            _build_leg(
+                mode="road",
+                source=_hub_location(destination_airport),
+                destination=destination,
                 distance_km=final_distance,
-                traffic_bias=4.0,
-                weather_bias=4.0,
-            )
-            air_total_risk = air_risk(
-                first_road_risk=first_risk,
-                linehaul_distance_km=air_distance,
-                final_road_risk=final_risk,
-                handling_complexity=18.0,
-            )
-            legs = [
-                _build_leg(
-                    mode="road",
-                    source=origin,
-                    destination=_hub_location(origin_airport),
-                    distance_km=first_distance,
-                    time_hours=road_time_hours(first_distance, 1.05),
-                    cost_usd=road_cost(first_distance, 1.05),
-                    risk_score=first_risk,
-                    purpose=f"First-mile pickup to {origin_airport.code}",
+                time_hours=road_time_hours(final_distance, 1.0),
+                cost_usd=road_cost(final_distance, 1.0),
+                risk_score=final_risk,
+                purpose=f"Final road delivery from {destination_airport.code}",
+            ),
+        ]
+        route_name = f"{origin.name} → {destination.name}"
+        candidates.append(
+            _summarize_option(
+                option_id=f"air-{origin_airport.code}-{destination_airport.code}",
+                name=f"Air via {origin_airport.code} → {destination_airport.code}",
+                mode="air",
+                mode_sequence=["road", "air", "road"],
+                route_name=route_name,
+                recommendation_reason=(
+                    f"Uses {origin_airport.code} and {destination_airport.code} for a clean airport-to-door air chain."
                 ),
-                _build_leg(
-                    mode="air",
-                    source=_hub_location(origin_airport),
-                    destination=_hub_location(destination_airport),
-                    distance_km=air_distance,
-                    time_hours=air_time_hours(air_distance, 8.0),
-                    cost_usd=air_cost(air_distance, total_handling_cost),
-                    risk_score=air_total_risk,
-                    purpose=f"Air freight from {origin_airport.code} to {destination_airport.code}",
-                    curvature=0.06,
-                ),
-                _build_leg(
-                    mode="road",
-                    source=_hub_location(destination_airport),
-                    destination=destination,
-                    distance_km=final_distance,
-                    time_hours=road_time_hours(final_distance, 1.0),
-                    cost_usd=road_cost(final_distance, 1.0),
-                    risk_score=final_risk,
-                    purpose=f"Final delivery from {destination_airport.code}",
-                ),
-            ]
-            route_name = f"{origin.name} → {destination.name}"
-            candidates.append(
-                _summarize_option(
-                    option_id=f"air-{origin_airport.code}-{destination_airport.code}",
-                    name=f"Air via {origin_airport.code} → {destination_airport.code}",
-                    mode="air",
-                    mode_sequence=["road", "air", "road"],
-                    route_name=route_name,
-                    recommendation_reason=(
-                        f"Uses {origin_airport.code} and {destination_airport.code} for a clean airport-to-door air chain."
-                    ),
-                    legs=legs,
-                    extra_fields={
-                        "origin": origin.name,
-                        "destination": destination.name,
-                        "selected_origin_airport": origin_airport.code,
-                        "selected_destination_airport": destination_airport.code,
-                        "first_road_leg": legs[0],
-                        "air_leg": legs[1],
-                        "final_road_leg": legs[2],
-                        "airport_handling_cost": total_handling_cost,
-                        "traffic_risk": max(first_traffic, final_traffic),
-                        "weather_risk": max(first_weather, final_weather),
-                    },
-                )
+                legs=legs,
+                extra_fields={
+                    "origin": origin.name,
+                    "destination": destination.name,
+                    "selected_origin_airport": origin_airport.code,
+                    "selected_destination_airport": destination_airport.code,
+                    "first_road_leg": legs[0],
+                    "air_leg": legs[1],
+                    "final_road_leg": legs[2],
+                    "airport_handling_cost": total_handling_cost,
+                    "air_route_validation": candidate_pair.validation,
+                    "traffic_risk": max(first_traffic, final_traffic),
+                    "weather_risk": max(first_weather, final_weather),
+                },
             )
+        )
 
     options = _pick_unique_options(
         candidates,
@@ -385,7 +401,8 @@ def generate_sea_options(origin: Location, destination: Location) -> list[dict[s
         for destination_port in find_nearest_seaports(destination.lat, destination.lng, limit=3):
             total_handling_cost = _round_cost(PORT_HANDLING_COST_USD * 2)
             first_distance = haversine_distance_km(origin.lat, origin.lng, origin_port.lat, origin_port.lng)
-            sea_distance = haversine_distance_km(origin_port.lat, origin_port.lng, destination_port.lat, destination_port.lng)
+            sea_route = build_estimated_sea_route(origin_port, destination_port)
+            sea_distance = sea_route.distance_km
             final_distance = haversine_distance_km(destination_port.lat, destination_port.lng, destination.lat, destination.lng)
             _, first_weather, first_risk = road_risk(
                 distance_km=first_distance,
@@ -412,7 +429,7 @@ def generate_sea_options(origin: Location, destination: Location) -> list[dict[s
                     time_hours=road_time_hours(first_distance, 0.98),
                     cost_usd=road_cost(first_distance, 0.98),
                     risk_score=first_risk,
-                    purpose=f"Drayage to {origin_port.code}",
+                    purpose=f"Road drayage to port ({origin_port.code})",
                 ),
                 _build_leg(
                     mode="sea",
@@ -422,8 +439,11 @@ def generate_sea_options(origin: Location, destination: Location) -> list[dict[s
                     time_hours=sea_time_hours(sea_distance, 36.0),
                     cost_usd=sea_cost(sea_distance, total_handling_cost),
                     risk_score=sea_total_risk,
-                    purpose=f"Ocean freight from {origin_port.code} to {destination_port.code}",
-                    curvature=-0.05,
+                    purpose=(
+                        f"Ocean freight via {sea_route.label} from "
+                        f"{origin_port.code} to {destination_port.code}"
+                    ),
+                    geometry=sea_route.geometry,
                 ),
                 _build_leg(
                     mode="road",
@@ -433,7 +453,7 @@ def generate_sea_options(origin: Location, destination: Location) -> list[dict[s
                     time_hours=road_time_hours(final_distance, 0.95),
                     cost_usd=road_cost(final_distance, 0.95),
                     risk_score=final_risk,
-                    purpose=f"Final delivery from {destination_port.code}",
+                    purpose=f"Final-mile road delivery from {destination_port.code}",
                 ),
             ]
             route_name = f"{origin.name} → {destination.name}"
@@ -548,6 +568,8 @@ def generate_hybrid_options(origin: Location, destination: Location) -> list[dic
         final_road_risk=final_risk,
         port_congestion_bias=10.0,
     )
+    hybrid_sea_route = build_estimated_sea_route(transfer_port, destination_port)
+    hybrid_sea_distance = max(hybrid_sea_route.distance_km, 120.0)
     mixed_legs = [
         _build_leg(
             mode="road",
@@ -584,12 +606,12 @@ def generate_hybrid_options(origin: Location, destination: Location) -> list[dic
             mode="sea",
             source=_hub_location(transfer_port),
             destination=_hub_location(destination_port),
-            distance_km=max(haversine_distance_km(transfer_port.lat, transfer_port.lng, destination_port.lat, destination_port.lng), 120.0),
-            time_hours=sea_time_hours(max(haversine_distance_km(transfer_port.lat, transfer_port.lng, destination_port.lat, destination_port.lng), 120.0), 12.0),
-            cost_usd=sea_cost(max(haversine_distance_km(transfer_port.lat, transfer_port.lng, destination_port.lat, destination_port.lng), 120.0), PORT_HANDLING_COST_USD),
+            distance_km=hybrid_sea_distance,
+            time_hours=sea_time_hours(hybrid_sea_distance, 12.0),
+            cost_usd=sea_cost(hybrid_sea_distance, PORT_HANDLING_COST_USD),
             risk_score=hybrid_sea_risk,
-            purpose=f"Short-sea transfer into {destination_port.code}",
-            curvature=-0.03,
+            purpose=f"Ocean freight via estimated maritime route into {destination_port.code}",
+            geometry=hybrid_sea_route.geometry,
         ),
         _build_leg(
             mode="road",
@@ -664,6 +686,13 @@ def generate_mode_simulation(
         "hybrid": generate_hybrid_options,
     }
     options = generators[selected_mode](origin, destination)
+    for option in options:
+        apply_weather_risk_to_option(option)
+        option["score"] = _score_option(
+            float(option["total_time_hours"]),
+            float(option["total_cost_usd"]),
+            float(option["risk_score"]),
+        )
     best_name = _mark_best_option(options)
     best_option = next(option for option in options if option["name"] == best_name)
 
@@ -680,7 +709,7 @@ def generate_mode_simulation(
         "risk_level": best_option["risk_level"],
         "risk": best_option["risk"],
         "distance_km": best_option["total_distance_km"],
-        "explanation": [best_option["recommendation_reason"]],
+        "explanation": list(best_option.get("explanation", [best_option["recommendation_reason"]])),
         "recommendation_reason": best_option["recommendation_reason"],
         "options": options,
         "best_option": best_name,

@@ -1,12 +1,12 @@
 [
-  { "code": "USOAK", "name": "Port of Oakland", "lat": 37.7955, "lng": -122.278, "country": "United States" },
-  { "code": "USLAX", "name": "Port of Los Angeles", "lat": 33.7361, "lng": -118.2631, "country": "United States" },
-  { "code": "USLGB", "name": "Port of Long Beach", "lat": 33.7542, "lng": -118.2167, "country": "United States" },
-  { "code": "USSEA", "name": "Port of Seattle", "lat": 47.6026, "lng": -122.3397, "country": "United States" },
-  { "code": "USNYC", "name": "Port of New York and New Jersey", "lat": 40.6681, "lng": -74.0451, "country": "United States" },
-  { "code": "USSAV", "name": "Port of Savannah", "lat": 32.0809, "lng": -81.0912, "country": "United States" },
-  { "code": "NLRTM", "name": "Port of Rotterdam", "lat": 51.955, "lng": 4.14, "country": "Netherlands" },
-  { "code": "SGSIN", "name": "Port of Singapore", "lat": 1.2644, "lng": 103.84, "country": "Singapore" },
-  { "code": "CNSHA", "name": "Port of Shanghai", "lat": 31.2304, "lng": 121.4737, "country": "China" },
-  { "code": "AEJEA", "name": "Port of Jebel Ali", "lat": 25.0236, "lng": 55.0617, "country": "United Arab Emirates" }
+  { "code": "USOAK", "name": "Port of Oakland", "lat": 37.7955, "lng": -122.278, "country": "United States", "coast": "west" },
+  { "code": "USLAX", "name": "Port of Los Angeles", "lat": 33.7361, "lng": -118.2631, "country": "United States", "coast": "west" },
+  { "code": "USLGB", "name": "Port of Long Beach", "lat": 33.7542, "lng": -118.2167, "country": "United States", "coast": "west" },
+  { "code": "USSEA", "name": "Port of Seattle", "lat": 47.6026, "lng": -122.3397, "country": "United States", "coast": "west" },
+  { "code": "USNYC", "name": "Port of New York and New Jersey", "lat": 40.6681, "lng": -74.0451, "country": "United States", "coast": "east" },
+  { "code": "USSAV", "name": "Port of Savannah", "lat": 32.0809, "lng": -81.0912, "country": "United States", "coast": "east" },
+  { "code": "NLRTM", "name": "Port of Rotterdam", "lat": 51.955, "lng": 4.14, "country": "Netherlands", "coast": "east" },
+  { "code": "SGSIN", "name": "Port of Singapore", "lat": 1.2644, "lng": 103.84, "country": "Singapore", "coast": "global" },
+  { "code": "CNSHA", "name": "Port of Shanghai", "lat": 31.2304, "lng": 121.4737, "country": "China", "coast": "west" },
+  { "code": "AEJEA", "name": "Port of Jebel Ali", "lat": 25.0236, "lng": 55.0617, "country": "United Arab Emirates", "coast": "global" }
 ]

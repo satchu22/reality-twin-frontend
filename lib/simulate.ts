@@ -39,6 +39,36 @@ export type SimulationStep = {
   geometry: [number, number][];
 };
 
+export type WeatherRisk = {
+  source: "open_meteo" | "noaa_nws" | "combined";
+  risk_level: "low" | "medium" | "high" | "unknown";
+  risk_score: number;
+  delay_hours: number;
+  summary: string;
+  alerts: Array<{
+    id?: string | null;
+    event?: string;
+    severity?: string;
+    certainty?: string;
+    urgency?: string;
+    headline?: string;
+    description?: string;
+    instruction?: string;
+    area_desc?: string;
+  }>;
+  affected_modes: string[];
+  lat: number;
+  lng: number;
+  sampled_locations: Array<{
+    lat: number;
+    lng: number;
+    summary: string;
+    risk_score: number;
+    source: string;
+  }>;
+  risk_explanation: string[];
+};
+
 export type SimulationOption = {
   id?: string;
   name: string;
@@ -63,6 +93,7 @@ export type SimulationOption = {
   estimated_time_hours?: number;
   estimated_cost_usd?: number;
   recommendation_reason: string;
+  weather_risk?: WeatherRisk;
   risk: "low" | "medium" | "high";
   risk_level: "low" | "medium" | "high";
   risk_score: number;

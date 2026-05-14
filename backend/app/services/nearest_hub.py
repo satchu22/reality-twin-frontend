@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ class Hub:
     lat: float
     lng: float
     country: str
+    coast: str | None = None
 
 
 def haversine_distance_km(
@@ -49,6 +51,40 @@ def _load_hubs(file_name: str) -> tuple[Hub, ...]:
 
 @lru_cache(maxsize=1)
 def load_airports() -> tuple[Hub, ...]:
+    csv_path = DATA_DIR / "airports_openflights.csv"
+    if csv_path.exists():
+        airports: list[Hub] = []
+        with csv_path.open(encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                if row.get("type") != "airport":
+                    continue
+
+                code = (row.get("iata") or "").strip().upper()
+                if not code or code == "\\N":
+                    continue
+
+                try:
+                    lat = float(row["latitude"])
+                    lng = float(row["longitude"])
+                except (TypeError, ValueError):
+                    continue
+
+                name = (row.get("name") or code).strip()
+                country = (row.get("country") or "Unknown").strip()
+                airports.append(
+                    Hub(
+                        code=code,
+                        name=name,
+                        lat=lat,
+                        lng=lng,
+                        country=country,
+                    )
+                )
+
+        if airports:
+            return tuple(airports)
+
     return _load_hubs("airports.json")
 
 

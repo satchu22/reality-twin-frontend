@@ -19,6 +19,7 @@ type RoutePanelProps = {
   simulationError: string | null;
   confirmationMessage: string | null;
   decisionOptions: DecisionOption[];
+  focusedOption: DecisionOption | null;
   detectedEvents: DecisionOption["live_events_used"];
   bestOptionName: string | null;
   approvedOptionName: string | null;
@@ -65,6 +66,7 @@ export default function RoutePanel({
   simulationError,
   confirmationMessage,
   decisionOptions,
+  focusedOption,
   detectedEvents,
   bestOptionName,
   approvedOptionName,
@@ -189,6 +191,50 @@ export default function RoutePanel({
             routeOptions={decisionOptions}
             events={detectedEvents}
           />
+
+          {focusedOption?.weather_risk && (
+            <section className="rounded-2xl border border-sky-400/20 bg-sky-400/10 p-4">
+              <p className="text-sm font-semibold text-white">Weather Signals Used</p>
+              <p className="mt-2 text-sm text-sky-100">
+                {focusedOption.weather_risk.summary}
+              </p>
+              <div className="mt-3 grid gap-2 text-xs text-sky-50/90">
+                {focusedOption.weather_risk.sampled_locations.map((sample) => (
+                  <div
+                    key={`${sample.lng}-${sample.lat}`}
+                    className="rounded-xl border border-white/10 bg-slate-950/30 p-3"
+                  >
+                    <p>
+                      {sample.lat.toFixed(2)}, {sample.lng.toFixed(2)}
+                    </p>
+                    <p className="mt-1">{sample.summary}</p>
+                  </div>
+                ))}
+              </div>
+              {focusedOption.weather_risk.risk_explanation.length > 0 && (
+                <div className="mt-3 space-y-2 rounded-xl border border-white/10 bg-slate-950/30 p-3 text-xs text-sky-50/90">
+                  {focusedOption.weather_risk.risk_explanation.map((line) => (
+                    <p key={`${focusedOption.name}-${line}`}>{line}</p>
+                  ))}
+                </div>
+              )}
+              {focusedOption.weather_risk.alerts.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {focusedOption.weather_risk.alerts.slice(0, 4).map((alert) => (
+                    <div
+                      key={`${alert.id ?? alert.event ?? "alert"}-${alert.headline ?? ""}`}
+                      className="rounded-xl border border-white/10 bg-slate-950/30 p-3 text-xs text-sky-50/90"
+                    >
+                      <p className="font-semibold text-white">
+                        {alert.event ?? "Weather Alert"}
+                      </p>
+                      <p className="mt-1">{alert.headline ?? alert.description ?? ""}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           <DecisionCards
             options={decisionOptions}
