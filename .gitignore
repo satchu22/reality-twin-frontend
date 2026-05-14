@@ -33,8 +33,11 @@ __pycache__/
 *.pyc
 *.pyo
 *.db
+*.db-journal
 *.sqlite
+*.sqlite-journal
 *.sqlite3
+*.sqlite3-journal
 backend/venv/
 venv/
 .venv/

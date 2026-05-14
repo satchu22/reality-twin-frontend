@@ -1,98 +1,100 @@
-## RealityTwin Local Setup
+## RealityTwin
 
-RealityTwin runs as:
-- FastAPI backend in `backend/`
-- Next.js frontend in this repo root
-- Free data integrations with safe mock fallbacks
+RealityTwin is a logistics simulation platform with:
+- a Next.js frontend in the repository root
+- a FastAPI backend in `backend/`
+- optional realtime updates over WebSockets
+- route simulation, map visualization, uploads, notifications, and transaction flows
 
-## Free Data Sources
+## Project Structure
 
-- Weather: Open-Meteo
-- Traffic: Mapbox free tier
-- Global events: GDELT when reachable, otherwise mock adapter
-- Satellite hazards: NASA FIRMS when configured, otherwise mock adapter
-- Ports: static CSV in `backend/app/data/ports.csv`
-- Airports: OpenFlights-style CSV in `backend/app/data/airports_openflights.csv`
+- `app/`: Next.js App Router pages and route handlers
+- `components/`: shared React UI and realtime provider
+- `lib/`: frontend API, simulation, map, and data helpers
+- `backend/app/`: FastAPI app code
+- `backend/app/data/`: bundled route, airport, and port reference data
+- `realitytwin-mobile/`: mobile client code
 
-## Required Env Vars
+## Environment Variables
 
-Copy `.env.example` to `.env.local` or `.env` and set:
+Frontend (`.env.local` for local development):
 
 ```bash
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=your_mapbox_free_tier_token
-DATABASE_URL=sqlite:///./backend/realitytwin.db
-MAPBOX_TRAFFIC_TOKEN=your_mapbox_free_tier_token
+```
+
+Backend (`backend/.env` locally):
+
+```bash
+DATABASE_URL=sqlite:///./realitytwin.db
+CORS_ALLOW_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+TRANSACTION_REMINDER_HOUR=0
+TRANSACTION_REMINDER_MINUTE=0
+LIVE_EVENT_REFRESH_MINUTES=10
+OPENWEATHER_API_KEY=
+MAPBOX_TRAFFIC_TOKEN=
 NASA_FIRMS_CSV_URL=
 ```
 
 Notes:
-- `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` is required for the frontend map.
-- `MAPBOX_TRAFFIC_TOKEN` is used by the backend traffic adapter.
-- `NASA_FIRMS_CSV_URL` is optional. Leave it blank to use the safe mock satellite adapter.
-- If `DATABASE_URL` is omitted, the backend code defaults to SQLite at `backend/realitytwin.db`.
+- `NEXT_PUBLIC_API_BASE_URL` defaults to `http://localhost:8000` when unset.
+- Frontend API requests use shared URL helpers so moving to a hosted backend later only requires changing environment variables.
+- Keep API keys and tokens only in environment variables, never in git.
 
-## Install
+## Local Development
 
-Backend:
+1. Install frontend dependencies:
+
+```bash
+npm install
+```
+
+2. Install backend dependencies:
 
 ```bash
 cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+cd ..
 ```
 
-Frontend:
+3. Start the backend:
 
 ```bash
-cd /Users/mangeshphadtare/reality-twin-frontend
-npm install
-```
-
-## Run Locally
-
-Terminal 1:
-
-```bash
-cd /Users/mangeshphadtare/reality-twin-frontend/backend
+cd backend
 source venv/bin/activate
-DATABASE_URL=sqlite:///./realitytwin.db uvicorn app.main:app --reload
+uvicorn app.main:app --reload
 ```
 
-Terminal 2:
+4. Start the frontend in a second terminal:
 
 ```bash
-cd /Users/mangeshphadtare/reality-twin-frontend
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 npm run dev
 ```
 
-Open `http://localhost:3000`.
+5. Open `http://localhost:3000`
 
-## Workflow
+## Verification
 
-- `Dashboard`: inspect uploaded batches
-- `Open Map`: view routes plus external events
-- `Simulate Route`: run route simulations from existing route ids
-- `Upload CSV / Destination`: upload CSVs or manually enter origin/destination coordinates and generate route options
+Recommended checks before pushing:
 
-## Test Steps
+```bash
+npm run lint
+npm run build
+backend/venv/bin/python -m compileall backend/app
+```
 
-1. Start the backend and frontend with the commands above.
-2. Open `http://localhost:3000`.
-3. Use `Upload CSV / Destination` to upload a CSV to `/data/upload`.
-4. On the same page, enter manual origin/destination coordinates and click `Generate Route Options`.
-5. Confirm the top 3 route cards show route type, total time, total cost, risk level, explanation bullets, and live events used.
-6. Open `Open Map` and confirm markers render as:
-   Blue = weather
-   Orange = traffic
-   Red = satellite hazard
-   Purple = global event
-7. Click a route on the map, run the simulation, and approve a decision from the route panel.
+## Security Notes
 
-## Verification Run
+Do not commit:
+- `.env`
+- `.env.local`
+- API keys
+- Mapbox tokens
+- database files
+- `node_modules`
+- `venv` or `.venv`
 
-Completed locally in this workspace:
-- `npm run lint`
-- `backend/venv/bin/python -m compileall backend/app`
-- Backend service smoke test against SQLite with adapter fallbacks
+The repository `.gitignore` is configured to protect those files.

@@ -1,3 +1,5 @@
+import { buildApiUrl } from "@/lib/api";
+
 export type DisruptionType =
   | "port_closure"
   | "weather"
@@ -127,8 +129,7 @@ export async function simulateRoute(
   console.log("Sending simulate payload:", payload);
 
   try {
-    // 🔥 FIXED: direct backend URL
-    response = await fetch("http://localhost:8000/simulate", {
+    response = await fetch(buildApiUrl("/simulate"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -183,19 +184,15 @@ export async function approveSimulationDecision(
   scenarioId: number | string,
   selectedOption: string,
 ): Promise<SimulationApprovalResponse> {
-  const response = await fetch(
-    // 🔥 FIXED: direct backend URL
-    `http://localhost:8000/simulate/${scenarioId}/approve`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        selected_option: selectedOption,
-      }),
+  const response = await fetch(buildApiUrl(`/simulate/${scenarioId}/approve`), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
+    body: JSON.stringify({
+      selected_option: selectedOption,
+    }),
+  });
 
   if (!response.ok) {
     let errorMessage = "Decision approval failed";

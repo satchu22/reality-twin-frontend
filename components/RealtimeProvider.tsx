@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { buildWebSocketUrl } from "@/lib/api";
 
 import type {
   RealtimeMessage,
@@ -30,13 +31,6 @@ type RealtimeContextValue = {
 };
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null);
-
-function getWebSocketUrl() {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-
-  return baseUrl.replace(/^http/i, "ws") + "/ws";
-}
 
 export default function RealtimeProvider({
   children,
@@ -118,7 +112,7 @@ export default function RealtimeProvider({
       setStatus("connecting");
 
       try {
-        const socket = new WebSocket(getWebSocketUrl());
+        const socket = new WebSocket(buildWebSocketUrl());
         socketRef.current = socket;
 
         socket.onopen = () => {
