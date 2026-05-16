@@ -1201,7 +1201,8 @@ const map = new mapboxgl.Map({
       return;
     }
 
-    setShowLiveEvents(!isManualMode);
+    setShowLiveEvents(false);
+    setShowWeatherRisk(false);
   }, [isManualMode, storageReady]);
 
   // `refreshVisibleEvents` is driven by refs plus current toggle state.
@@ -1380,7 +1381,11 @@ const map = new mapboxgl.Map({
     setConfirmationMessage(null);
     setApprovedOptionName(null);
     setFocusedOptionName(null);
+    setShowLiveEvents(false);
+    setShowWeatherRisk(false);
+    setSimulationResult(null);
     clearWeatherMarkers();
+    clearEventMarkers();
     removeDecisionRouteOverlays();
 
     try {
@@ -1528,7 +1533,8 @@ const map = new mapboxgl.Map({
         </div>
       )}
 
-      <div className="pointer-events-none absolute left-6 top-6 z-10 max-w-md space-y-3">
+      <div className="pointer-events-auto absolute left-6 top-6 z-10 max-h-[calc(100vh-3rem)] w-[min(26rem,calc(100%-3rem))] overflow-y-auto pr-2">
+        <div className="space-y-3">
         <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white shadow-xl backdrop-blur">
           <p className="text-sm font-semibold text-cyan-300">Route Workflow</p>
           <p className="mt-1 text-sm text-slate-300">
@@ -1657,6 +1663,7 @@ const map = new mapboxgl.Map({
             No route options available
           </div>
         )}
+        </div>
       </div>
 
       <RoutePanel

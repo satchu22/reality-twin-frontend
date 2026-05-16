@@ -82,7 +82,7 @@ export default function RoutePanel({
   }
 
   return (
-    <aside className="fixed right-0 top-0 z-10 flex h-full w-full max-w-sm flex-col border-l border-white/10 bg-slate-950/95 p-6 text-white shadow-2xl backdrop-blur md:w-96">
+    <aside className="fixed right-0 top-0 z-10 flex h-full w-full max-w-sm flex-col overflow-hidden border-l border-white/10 bg-slate-950/95 p-6 text-white shadow-2xl backdrop-blur md:w-96">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs uppercase tracking-[0.24em] text-cyan-300">
@@ -100,7 +100,7 @@ export default function RoutePanel({
         </button>
       </div>
 
-      <div className="mt-8 space-y-4">
+      <div className="mt-8 flex-1 space-y-4 overflow-y-auto pr-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <p className="text-sm text-slate-400">Route Name</p>
           <p className="mt-2 text-lg font-medium text-white">{route.name}</p>
@@ -148,7 +148,7 @@ export default function RoutePanel({
         </div>
       </div>
 
-      <div className="mt-auto pt-8">
+        <div className="pt-4">
         <button
           type="button"
           onClick={onSimulate}
