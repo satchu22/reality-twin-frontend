@@ -711,10 +711,18 @@ def get_overview(db: Session) -> dict[str, object]:
     latest = db.query(Batch).order_by(Batch.id.desc()).first()
     if not latest:
         return {
+            "status": "ok",
+            "product": "RealityTwin",
             "active_routes": 0,
             "risk_alerts": 0,
             "cost_exposure": 0,
             "best_action": "Upload data to begin",
+            "summary": {
+                "active_simulations": 0,
+                "supported_modes": ["road", "air", "sea", "hybrid"],
+                "risk_signals": ["weather"],
+                "system_health": "local-dev",
+            },
         }
 
     routes = db.query(Route).filter(Route.batch_id == latest.id).all()
@@ -722,12 +730,21 @@ def get_overview(db: Session) -> dict[str, object]:
     high_risk_events = (
         db.query(Disruption).filter(Disruption.severity == "high").count()
     )
+    simulation_count = db.query(Simulation).filter(Simulation.batch_id == latest.id).count()
 
     return {
+        "status": "ok",
+        "product": "RealityTwin",
         "active_routes": len(routes),
         "risk_alerts": high_risk_events,
         "cost_exposure": round(simulation.total_cost, 2) if simulation else 0,
         "best_action": simulation.best_action if simulation else "Review top route option",
+        "summary": {
+            "active_simulations": simulation_count,
+            "supported_modes": ["road", "air", "sea", "hybrid"],
+            "risk_signals": ["weather"],
+            "system_health": "local-dev",
+        },
     }
 
 
