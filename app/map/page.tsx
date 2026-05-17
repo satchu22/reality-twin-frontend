@@ -1,6 +1,13 @@
 "use client";
 
-import { Suspense, useEffect, useEffectEvent, useRef, useState } from "react";
+import {
+  type UIEvent,
+  Suspense,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -324,7 +331,8 @@ function MapPageContent() {
   const [simulationError, setSimulationError] = useState<string | null>(null);
   const [confirmationMessage, setConfirmationMessage] = useState<string | null>(null);
   const [approvedOptionName, setApprovedOptionName] = useState<string | null>(null);
-  const [focusedOptionName, setFocusedOptionName] = useState<string | null>(null);
+  const [selectedRouteOption, setSelectedRouteOption] =
+    useState<SimulationOption | null>(null);
   const [storedOrigin, setStoredOrigin] = useState<StoredLocation | null>(null);
   const [storedDestination, setStoredDestination] = useState<StoredLocation | null>(null);
   const [selectedSimulationMode, setSelectedSimulationMode] =
@@ -361,7 +369,11 @@ function MapPageContent() {
       )
     : [];
   const focusedOption =
-    simulationResult?.options.find((option) => option.name === focusedOptionName) ??
+    (selectedRouteOption
+      ? simulationResult?.options.find(
+          (option) => option.name === selectedRouteOption.name,
+        ) ?? null
+      : null) ??
     findBestOption(simulationResult?.options ?? [], simulationResult?.best_option ?? null) ??
     null;
 
@@ -610,6 +622,10 @@ function MapPageContent() {
     updateEventsSource(events);
   }
 
+  function stopSidebarScrollPropagation(event: UIEvent<HTMLElement>) {
+    event.stopPropagation();
+  }
+
   function buildOptionColorMap(options: SimulationOption[], bestOptionName?: string | null) {
     const colorMap = new Map<string, string>();
     const bestOption = findBestOption(options, bestOptionName);
@@ -662,7 +678,7 @@ function MapPageContent() {
     }
   }
 
-  function applyDecisionRouteSelection(optionName: string | null) {
+  function applyDecisionRouteSelection(option: SimulationOption | null) {
     const map = mapRef.current;
     if (!map) {
       return;
@@ -674,18 +690,21 @@ function MapPageContent() {
           map.setPaintProperty(
             layerId,
             "line-width",
-            optionName === overlay.option.name ? overlay.baseWidth + 2 : overlay.baseWidth,
+            option?.name === overlay.option.name ? overlay.baseWidth + 2 : overlay.baseWidth,
           );
           map.setPaintProperty(
             layerId,
             "line-opacity",
-            optionName && optionName !== overlay.option.name ? 0.45 : 0.85,
+            option?.name && option.name !== overlay.option.name ? 0.3 : 0.9,
           );
         }
       }
     }
 
-    setFocusedOptionName(optionName);
+    setSelectedRouteOption(option);
+    activeRouteGeometryRef.current = option?.geometry ?? [];
+    refreshVisibleEvents();
+    refreshWeatherMarkers(option);
   }
 
   const drawDecisionRouteOverlays = useEffectEvent(async (options: SimulationOption[]) => {
@@ -732,6 +751,10 @@ function MapPageContent() {
           }
 
           if (step.mode === "road") {
+            if (Array.isArray(step.geometry) && step.geometry.length > 1) {
+              return step.geometry;
+            }
+
             return getRouteGeometry(endpoints[0], endpoints[1]);
           }
 
@@ -816,7 +839,7 @@ function MapPageContent() {
         });
 
         map.on("click", layerId, (event) => {
-          applyDecisionRouteSelection(option.name);
+          applyDecisionRouteSelection(option);
 
           const popupCoordinate =
             event.lngLat ??
@@ -860,18 +883,12 @@ function MapPageContent() {
     }
 
     decisionOverlaysRef.current = overlays;
-    const nextFocusedName =
-      focusedOptionName && sortedOptions.some((option) => option.name === focusedOptionName)
-        ? focusedOptionName
-        : findBestOption(sortedOptions, simulationResult?.best_option ?? null)?.name ?? null;
-    applyDecisionRouteSelection(nextFocusedName);
-
-    const bestOption =
-      sortedOptions.find((option) => option.name === nextFocusedName) ??
-      findBestOption(sortedOptions, simulationResult?.best_option ?? null);
-    activeRouteGeometryRef.current = bestOption?.geometry ?? [];
-    refreshVisibleEvents();
-    refreshWeatherMarkers(bestOption ?? null);
+    const nextFocusedOption =
+      selectedRouteOption &&
+      sortedOptions.some((option) => option.name === selectedRouteOption.name)
+        ? sortedOptions.find((option) => option.name === selectedRouteOption.name) ?? null
+        : findBestOption(sortedOptions, simulationResult?.best_option ?? null);
+    applyDecisionRouteSelection(nextFocusedOption);
 
     if (!bounds.isEmpty()) {
       map.fitBounds(bounds, { padding: 80, maxZoom: 8 });
@@ -1232,7 +1249,7 @@ const map = new mapboxgl.Map({
     ) {
       setSimulationResult(null);
       setApprovedOptionName(null);
-      setFocusedOptionName(null);
+      setSelectedRouteOption(null);
       clearWeatherMarkers();
       removeDecisionRouteOverlays();
       return;
@@ -1363,6 +1380,19 @@ const map = new mapboxgl.Map({
       return;
     }
 
+    setSelectedRouteOption((currentOption) => {
+      if (!currentOption) {
+        return findBestOption(
+          simulationResult.options,
+          simulationResult.best_option ?? null,
+        );
+      }
+
+      return (
+        simulationResult.options.find((option) => option.name === currentOption.name) ??
+        findBestOption(simulationResult.options, simulationResult.best_option ?? null)
+      );
+    });
     void drawDecisionRouteOverlays(simulationResult.options);
   }, [simulationResult]);
 
@@ -1380,7 +1410,7 @@ const map = new mapboxgl.Map({
     setSimulationError(null);
     setConfirmationMessage(null);
     setApprovedOptionName(null);
-    setFocusedOptionName(null);
+    setSelectedRouteOption(null);
     setShowLiveEvents(false);
     setShowWeatherRisk(false);
     setSimulationResult(null);
@@ -1487,7 +1517,7 @@ const map = new mapboxgl.Map({
       const approvalResult = await approveSimulationDecision(approvalTarget, option.name);
       setApprovedOptionName(option.name);
       setConfirmationMessage(approvalResult.message);
-      applyDecisionRouteSelection(option.name);
+      applyDecisionRouteSelection(option);
     } catch (error) {
       setSimulationError(
         error instanceof Error ? error.message : "Decision approval failed",
@@ -1498,11 +1528,8 @@ const map = new mapboxgl.Map({
   }
 
   function handleViewOption(option: DecisionOption) {
-    applyDecisionRouteSelection(option.name);
-    activeRouteGeometryRef.current = option.geometry ?? [];
+    applyDecisionRouteSelection(option);
     fitMapToCoordinates(option.geometry ?? []);
-    refreshVisibleEvents();
-    refreshWeatherMarkers(option);
   }
 
   function handleClosePanel() {
@@ -1512,6 +1539,7 @@ const map = new mapboxgl.Map({
     setSimulationError(null);
     setConfirmationMessage(null);
     setApprovedOptionName(null);
+    setSelectedRouteOption(null);
     clearWeatherMarkers();
     removeDecisionRouteOverlays();
     resetSelectionVisuals();
@@ -1533,7 +1561,11 @@ const map = new mapboxgl.Map({
         </div>
       )}
 
-      <div className="pointer-events-auto absolute left-6 top-6 z-10 max-h-[calc(100vh-3rem)] w-[min(26rem,calc(100%-3rem))] overflow-y-auto pr-2">
+      <div
+        className="pointer-events-auto absolute left-6 top-6 z-10 max-h-[calc(100vh-3rem)] w-[min(26rem,calc(100%-3rem))] overflow-y-auto overscroll-contain pr-2"
+        onWheelCapture={stopSidebarScrollPropagation}
+        onTouchMoveCapture={stopSidebarScrollPropagation}
+      >
         <div className="space-y-3">
         <div className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white shadow-xl backdrop-blur">
           <p className="text-sm font-semibold text-cyan-300">Route Workflow</p>
@@ -1603,6 +1635,7 @@ const map = new mapboxgl.Map({
         <MapRouteDetails
           routes={simulationResult?.options ?? []}
           bestRouteName={simulationResult?.best_option ?? null}
+          selectedRouteName={focusedOption?.name ?? null}
         />
 
         {routesLoading && (
@@ -1678,11 +1711,13 @@ const map = new mapboxgl.Map({
         detectedEvents={detectedEvents}
         bestOptionName={simulationResult?.best_option ?? null}
         approvedOptionName={approvedOptionName}
+        selectedOptionName={focusedOption?.name ?? null}
         selectedMode={selectedSimulationMode}
         onClose={handleClosePanel}
         onSimulate={() => void handleSimulateDisruption()}
         onSelectMode={handleSelectSimulationMode}
         onApprove={handleApproveDecision}
+        onSelectOption={handleViewOption}
         onViewOption={handleViewOption}
       />
     </div>

@@ -23,11 +23,13 @@ type RoutePanelProps = {
   detectedEvents: DecisionOption["live_events_used"];
   bestOptionName: string | null;
   approvedOptionName: string | null;
+  selectedOptionName: string | null;
   selectedMode: SimulationMode;
   onClose: () => void;
   onSimulate: () => void;
   onSelectMode: (mode: SimulationMode) => void;
   onApprove: (option: DecisionOption) => void;
+  onSelectOption: (option: DecisionOption) => void;
   onViewOption: (option: DecisionOption) => void;
 };
 
@@ -70,11 +72,13 @@ export default function RoutePanel({
   detectedEvents,
   bestOptionName,
   approvedOptionName,
+  selectedOptionName,
   selectedMode,
   onClose,
   onSimulate,
   onSelectMode,
   onApprove,
+  onSelectOption,
   onViewOption,
 }: RoutePanelProps) {
   if (!route || !isOpen) {
@@ -82,7 +86,11 @@ export default function RoutePanel({
   }
 
   return (
-    <aside className="fixed right-0 top-0 z-10 flex h-full w-full max-w-sm flex-col overflow-hidden border-l border-white/10 bg-slate-950/95 p-6 text-white shadow-2xl backdrop-blur md:w-96">
+    <aside
+      className="pointer-events-auto fixed inset-y-0 right-0 z-10 flex h-full w-full max-w-sm min-h-0 flex-col overflow-hidden border-l border-white/10 bg-slate-950/95 p-6 text-white shadow-2xl backdrop-blur md:w-96"
+      onWheelCapture={(event) => event.stopPropagation()}
+      onTouchMoveCapture={(event) => event.stopPropagation()}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs uppercase tracking-[0.24em] text-cyan-300">
@@ -100,7 +108,7 @@ export default function RoutePanel({
         </button>
       </div>
 
-      <div className="mt-8 flex-1 space-y-4 overflow-y-auto pr-2">
+      <div className="mt-8 flex-1 min-h-0 space-y-4 overflow-y-auto overscroll-contain pr-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <p className="text-sm text-slate-400">Route Name</p>
           <p className="mt-2 text-lg font-medium text-white">{route.name}</p>
@@ -146,105 +154,110 @@ export default function RoutePanel({
             })}
           </div>
         </div>
-      </div>
-
         <div className="pt-4">
-        <button
-          type="button"
-          onClick={onSimulate}
-          disabled={simulationLoading || route.distance === null}
-          className="flex w-full items-center justify-center gap-3 rounded-2xl bg-cyan-400 px-5 py-4 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-60"
-        >
-          {simulationLoading && (
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-950/40 border-t-slate-950" />
-          )}
-          <span>
-            {simulationLoading
-              ? "Generating simulation..."
-              : `Generate ${selectedMode[0].toUpperCase()}${selectedMode.slice(1)} Simulation`}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={onSimulate}
+            disabled={simulationLoading || route.distance === null}
+            className="flex w-full items-center justify-center gap-3 rounded-2xl bg-cyan-400 px-5 py-4 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-60"
+          >
+            {simulationLoading && (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-950/40 border-t-slate-950" />
+            )}
+            <span>
+              {simulationLoading
+                ? "Generating simulation..."
+                : `Generate ${selectedMode[0].toUpperCase()}${selectedMode.slice(1)} Simulation`}
+            </span>
+          </button>
 
-        {simulationError && (
-          <p className="mt-4 rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
-            {simulationError}
-          </p>
-        )}
-
-        {confirmationMessage && (
-          <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-200">
-            {confirmationMessage}
-          </p>
-        )}
-
-        <div className="mt-6 space-y-4">
-          <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4">
-            <p className="text-sm text-slate-300">Decision Options</p>
-            <p className="mt-2 text-lg font-semibold text-white">
-              {bestOptionName
-                ? `Best option: ${bestOptionName}`
-                : "Generate simulation options for this route."}
+          {simulationError && (
+            <p className="mt-4 rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
+              {simulationError}
             </p>
-          </div>
+          )}
 
-          <AIInsights
-            routeOptions={decisionOptions}
-            events={detectedEvents}
-          />
+          {confirmationMessage && (
+            <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-200">
+              {confirmationMessage}
+            </p>
+          )}
 
-          {focusedOption?.weather_risk && (
-            <section className="rounded-2xl border border-sky-400/20 bg-sky-400/10 p-4">
-              <p className="text-sm font-semibold text-white">Weather Signals Used</p>
-              <p className="mt-2 text-sm text-sky-100">
-                {focusedOption.weather_risk.summary}
+          <div className="mt-6 space-y-4">
+            <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4">
+              <p className="text-sm text-slate-300">Decision Options</p>
+              <p className="mt-2 text-lg font-semibold text-white">
+                {bestOptionName
+                  ? `Best option: ${bestOptionName}`
+                  : "Generate simulation options for this route."}
               </p>
-              <div className="mt-3 grid gap-2 text-xs text-sky-50/90">
-                {focusedOption.weather_risk.sampled_locations.map((sample) => (
-                  <div
-                    key={`${sample.lng}-${sample.lat}`}
-                    className="rounded-xl border border-white/10 bg-slate-950/30 p-3"
-                  >
-                    <p>
-                      {sample.lat.toFixed(2)}, {sample.lng.toFixed(2)}
-                    </p>
-                    <p className="mt-1">{sample.summary}</p>
-                  </div>
-                ))}
-              </div>
-              {focusedOption.weather_risk.risk_explanation.length > 0 && (
-                <div className="mt-3 space-y-2 rounded-xl border border-white/10 bg-slate-950/30 p-3 text-xs text-sky-50/90">
-                  {focusedOption.weather_risk.risk_explanation.map((line) => (
-                    <p key={`${focusedOption.name}-${line}`}>{line}</p>
-                  ))}
-                </div>
-              )}
-              {focusedOption.weather_risk.alerts.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {focusedOption.weather_risk.alerts.slice(0, 4).map((alert) => (
+            </div>
+
+            <AIInsights
+              routeOptions={decisionOptions}
+              events={detectedEvents}
+            />
+
+            {focusedOption?.weather_risk && (
+              <section className="rounded-2xl border border-sky-400/20 bg-sky-400/10 p-4">
+                <p className="text-sm font-semibold text-white">
+                  Weather Signals Used
+                </p>
+                <p className="mt-2 text-sm text-sky-100">
+                  {focusedOption.weather_risk.summary}
+                </p>
+                <div className="mt-3 grid gap-2 text-xs text-sky-50/90">
+                  {focusedOption.weather_risk.sampled_locations.map((sample) => (
                     <div
-                      key={`${alert.id ?? alert.event ?? "alert"}-${alert.headline ?? ""}`}
-                      className="rounded-xl border border-white/10 bg-slate-950/30 p-3 text-xs text-sky-50/90"
+                      key={`${sample.lng}-${sample.lat}`}
+                      className="rounded-xl border border-white/10 bg-slate-950/30 p-3"
                     >
-                      <p className="font-semibold text-white">
-                        {alert.event ?? "Weather Alert"}
+                      <p>
+                        {sample.lat.toFixed(2)}, {sample.lng.toFixed(2)}
                       </p>
-                      <p className="mt-1">{alert.headline ?? alert.description ?? ""}</p>
+                      <p className="mt-1">{sample.summary}</p>
                     </div>
                   ))}
                 </div>
-              )}
-            </section>
-          )}
+                {focusedOption.weather_risk.risk_explanation.length > 0 && (
+                  <div className="mt-3 space-y-2 rounded-xl border border-white/10 bg-slate-950/30 p-3 text-xs text-sky-50/90">
+                    {focusedOption.weather_risk.risk_explanation.map((line) => (
+                      <p key={`${focusedOption.name}-${line}`}>{line}</p>
+                    ))}
+                  </div>
+                )}
+                {focusedOption.weather_risk.alerts.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {focusedOption.weather_risk.alerts.slice(0, 4).map((alert) => (
+                      <div
+                        key={`${alert.id ?? alert.event ?? "alert"}-${alert.headline ?? ""}`}
+                        className="rounded-xl border border-white/10 bg-slate-950/30 p-3 text-xs text-sky-50/90"
+                      >
+                        <p className="font-semibold text-white">
+                          {alert.event ?? "Weather Alert"}
+                        </p>
+                        <p className="mt-1">
+                          {alert.headline ?? alert.description ?? ""}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
 
-          <DecisionCards
-            options={decisionOptions}
-            bestOptionName={bestOptionName}
-            onApproveDecision={onApprove}
-            onViewOption={onViewOption}
-            approvalLoading={approvalLoading}
-            approvedOptionName={approvedOptionName}
-            emptyMessage="No route options yet. Generate simulation options for this route."
-          />
+            <DecisionCards
+              options={decisionOptions}
+              bestOptionName={bestOptionName}
+              selectedOptionName={selectedOptionName}
+              onSelectOption={onSelectOption}
+              onApproveDecision={onApprove}
+              onViewOption={onViewOption}
+              approvalLoading={approvalLoading}
+              approvedOptionName={approvedOptionName}
+              emptyMessage="No route options yet. Generate simulation options for this route."
+            />
+          </div>
         </div>
       </div>
     </aside>

@@ -5,6 +5,8 @@ export type DecisionOption = SimulationOption;
 type DecisionCardsProps = {
   options: DecisionOption[];
   bestOptionName?: string | null;
+  selectedOptionName?: string | null;
+  onSelectOption?: (option: DecisionOption) => void;
   onApproveDecision?: (option: DecisionOption) => void;
   onViewOption?: (option: DecisionOption) => void;
   approvalLoading?: boolean;
@@ -28,6 +30,8 @@ function formatHours(value: number) {
 export default function DecisionCards({
   options,
   bestOptionName,
+  selectedOptionName = null,
+  onSelectOption,
   onApproveDecision,
   onViewOption,
   approvalLoading = false,
@@ -47,12 +51,24 @@ export default function DecisionCards({
       {options.map((option) => {
         const isBest = (bestOptionName || options[0]?.name) === option.name;
         const isApproved = approvedOptionName === option.name;
+        const isSelected = selectedOptionName === option.name;
 
         return (
           <article
             key={option.name}
-            className={`rounded-3xl border p-6 shadow-lg backdrop-blur transition ${
-              isBest
+            role="button"
+            tabIndex={0}
+            onClick={() => onSelectOption?.(option)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelectOption?.(option);
+              }
+            }}
+            className={`cursor-pointer rounded-3xl border p-6 shadow-lg backdrop-blur transition ${
+              isSelected
+                ? "border-cyan-300 bg-cyan-400/10"
+                : isBest
                 ? "border-emerald-400 bg-emerald-400/10"
                 : "border-white/10 bg-white/5"
             }`}
@@ -71,6 +87,14 @@ export default function DecisionCards({
                 </span>
               )}
             </div>
+
+            {isSelected && (
+              <div className="mt-3">
+                <span className="rounded-full border border-cyan-300/40 bg-cyan-400/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-cyan-100">
+                  Selected Route
+                </span>
+              </div>
+            )}
 
             <div className="mt-6 space-y-3 text-sm text-slate-200">
               <div className="flex items-center justify-between rounded-2xl bg-slate-950/40 px-4 py-3">
@@ -166,7 +190,10 @@ export default function DecisionCards({
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               <button
                 type="button"
-                onClick={() => onViewOption?.(option)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onViewOption?.(option);
+                }}
                 className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 font-semibold text-white transition hover:bg-white/10"
               >
                 View On Map
@@ -175,7 +202,10 @@ export default function DecisionCards({
               <button
                 type="button"
                 disabled={approvalLoading || isApproved}
-                onClick={() => onApproveDecision?.(option)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onApproveDecision?.(option);
+                }}
                 className="w-full rounded-2xl border border-cyan-300/20 bg-cyan-400 px-4 py-3 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-60"
               >
                 {approvalLoading

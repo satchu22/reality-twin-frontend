@@ -5,6 +5,7 @@ import { type SimulationOption } from "@/lib/simulate";
 type MapRouteDetailsProps = {
   routes: SimulationOption[];
   bestRouteName?: string | null;
+  selectedRouteName?: string | null;
 };
 
 function formatCurrency(value: number) {
@@ -22,6 +23,7 @@ function formatHours(value: number) {
 export default function MapRouteDetails({
   routes,
   bestRouteName = null,
+  selectedRouteName = null,
 }: MapRouteDetailsProps) {
   if (routes.length === 0) {
     return null;
@@ -41,12 +43,15 @@ export default function MapRouteDetails({
       <div className="mt-3 space-y-3">
         {routes.slice(0, 3).map((route) => {
           const isBest = (bestRouteName || fallbackBestRoute?.name) === route.name;
+          const isSelected = selectedRouteName === route.name;
 
           return (
             <article
               key={route.name}
               className={`rounded-2xl border px-4 py-3 transition ${
-                isBest
+                isSelected
+                  ? "border-cyan-300/60 bg-cyan-400/10"
+                  : isBest
                   ? "border-emerald-400/50 bg-emerald-400/10"
                   : "border-white/10 bg-slate-950/40"
               }`}
@@ -58,11 +63,15 @@ export default function MapRouteDetails({
                     {route.mode}
                   </p>
                 </div>
-                {isBest && (
+                {isSelected ? (
+                  <span className="rounded-full bg-cyan-300 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-950">
+                    Selected
+                  </span>
+                ) : isBest ? (
                   <span className="rounded-full bg-emerald-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-950">
                     Best Route
                   </span>
-                )}
+                ) : null}
               </div>
 
                 <div className="mt-3 grid gap-2 text-xs text-slate-300">
