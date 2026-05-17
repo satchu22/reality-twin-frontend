@@ -2,6 +2,8 @@
   { "code": "SFO", "name": "San Francisco International Airport", "lat": 37.6213, "lng": -122.379, "country": "United States" },
   { "code": "OAK", "name": "Oakland International Airport", "lat": 37.7126, "lng": -122.2197, "country": "United States" },
   { "code": "SJC", "name": "San Jose Mineta International Airport", "lat": 37.3639, "lng": -121.9289, "country": "United States" },
+  { "code": "PDX", "name": "Portland International Airport", "lat": 45.5898, "lng": -122.5951, "country": "United States" },
+  { "code": "PAE", "name": "Paine Field", "lat": 47.9063, "lng": -122.2819, "country": "United States" },
   { "code": "JFK", "name": "John F. Kennedy International Airport", "lat": 40.6413, "lng": -73.7781, "country": "United States" },
   { "code": "EWR", "name": "Newark Liberty International Airport", "lat": 40.6895, "lng": -74.1745, "country": "United States" },
   { "code": "LGA", "name": "LaGuardia Airport", "lat": 40.7769, "lng": -73.874, "country": "United States" },

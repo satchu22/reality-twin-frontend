@@ -49,11 +49,21 @@ def _load_hubs(file_name: str) -> tuple[Hub, ...]:
     return tuple(Hub(**record) for record in records)
 
 
+def _merge_hub_collections(*collections: tuple[Hub, ...]) -> tuple[Hub, ...]:
+    merged: dict[str, Hub] = {}
+
+    for collection in collections:
+        for hub in collection:
+            merged[hub.code] = hub
+
+    return tuple(merged.values())
+
+
 @lru_cache(maxsize=1)
 def load_airports() -> tuple[Hub, ...]:
     csv_path = DATA_DIR / "airports_openflights.csv"
+    csv_airports: list[Hub] = []
     if csv_path.exists():
-        airports: list[Hub] = []
         with csv_path.open(encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
             for row in reader:
@@ -72,7 +82,7 @@ def load_airports() -> tuple[Hub, ...]:
 
                 name = (row.get("name") or code).strip()
                 country = (row.get("country") or "Unknown").strip()
-                airports.append(
+                csv_airports.append(
                     Hub(
                         code=code,
                         name=name,
@@ -82,8 +92,9 @@ def load_airports() -> tuple[Hub, ...]:
                     )
                 )
 
-        if airports:
-            return tuple(airports)
+    merged_airports = _merge_hub_collections(_load_hubs("airports.json"), tuple(csv_airports))
+    if merged_airports:
+        return merged_airports
 
     return _load_hubs("airports.json")
 
@@ -93,15 +104,91 @@ def load_seaports() -> tuple[Hub, ...]:
     return _load_hubs("seaports.json")
 
 
-def find_nearest_airports(lat: float, lng: float, limit: int = 3) -> list[Hub]:
-    return sorted(
+def find_nearest_hubs(
+    lat: float,
+    lng: float,
+    hubs: tuple[Hub, ...],
+    *,
+    limit: int = 3,
+    max_distance_km: float | None = None,
+    fallback_distance_km: float | None = None,
+    preferred_country: str | None = None,
+    min_results: int = 2,
+) -> list[Hub]:
+    ranked = sorted(
+        hubs,
+        key=lambda hub: haversine_distance_km(lat, lng, hub.lat, hub.lng),
+    )
+    if preferred_country:
+        same_country = [hub for hub in ranked if hub.country == preferred_country]
+        if same_country:
+            ranked = same_country
+
+    def _within(distance_limit: float | None) -> list[Hub]:
+        if distance_limit is None:
+            return ranked
+        return [
+            hub
+            for hub in ranked
+            if haversine_distance_km(lat, lng, hub.lat, hub.lng) <= distance_limit
+        ]
+
+    primary = _within(max_distance_km)
+    if len(primary) >= min(limit, min_results):
+        return primary[:limit]
+
+    fallback = _within(fallback_distance_km)
+    if len(fallback) >= min(limit, min_results):
+        return fallback[:limit]
+
+    if primary:
+        return primary[:limit]
+
+    if fallback:
+        return fallback[:limit]
+
+    return ranked[:limit]
+
+
+def find_nearest_airports(
+    lat: float,
+    lng: float,
+    limit: int = 3,
+    *,
+    max_distance_km: float | None = None,
+    fallback_distance_km: float | None = None,
+    preferred_country: str | None = None,
+    min_results: int = 2,
+) -> list[Hub]:
+    return find_nearest_hubs(
+        lat,
+        lng,
         load_airports(),
-        key=lambda hub: haversine_distance_km(lat, lng, hub.lat, hub.lng),
-    )[:limit]
+        limit=limit,
+        max_distance_km=max_distance_km,
+        fallback_distance_km=fallback_distance_km,
+        preferred_country=preferred_country,
+        min_results=min_results,
+    )
 
 
-def find_nearest_seaports(lat: float, lng: float, limit: int = 3) -> list[Hub]:
-    return sorted(
+def find_nearest_seaports(
+    lat: float,
+    lng: float,
+    limit: int = 3,
+    *,
+    max_distance_km: float | None = None,
+    fallback_distance_km: float | None = None,
+    preferred_country: str | None = None,
+    min_results: int = 2,
+) -> list[Hub]:
+    return find_nearest_hubs(
+        lat,
+        lng,
         load_seaports(),
-        key=lambda hub: haversine_distance_km(lat, lng, hub.lat, hub.lng),
-    )[:limit]
+        limit=limit,
+        max_distance_km=max_distance_km,
+        fallback_distance_km=fallback_distance_km,
+        preferred_country=preferred_country,
+        min_results=min_results,
+    )

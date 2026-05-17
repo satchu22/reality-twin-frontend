@@ -1,8 +1,11 @@
 [
   { "code": "USOAK", "name": "Port of Oakland", "lat": 37.7955, "lng": -122.278, "country": "United States", "coast": "west" },
+  { "code": "USSFO", "name": "Port of San Francisco", "lat": 37.8083, "lng": -122.4653, "country": "United States", "coast": "west" },
   { "code": "USLAX", "name": "Port of Los Angeles", "lat": 33.7361, "lng": -118.2631, "country": "United States", "coast": "west" },
   { "code": "USLGB", "name": "Port of Long Beach", "lat": 33.7542, "lng": -118.2167, "country": "United States", "coast": "west" },
   { "code": "USSEA", "name": "Port of Seattle", "lat": 47.6026, "lng": -122.3397, "country": "United States", "coast": "west" },
+  { "code": "USTIW", "name": "Port of Tacoma", "lat": 47.2665, "lng": -122.4259, "country": "United States", "coast": "west" },
+  { "code": "USMIA", "name": "PortMiami", "lat": 25.7781, "lng": -80.1794, "country": "United States", "coast": "east" },
   { "code": "USNYC", "name": "Port of New York and New Jersey", "lat": 40.6681, "lng": -74.0451, "country": "United States", "coast": "east" },
   { "code": "USSAV", "name": "Port of Savannah", "lat": 32.0809, "lng": -81.0912, "country": "United States", "coast": "east" },
   { "code": "NLRTM", "name": "Port of Rotterdam", "lat": 51.955, "lng": 4.14, "country": "Netherlands", "coast": "east" },

@@ -30,6 +30,11 @@ from ...services.weather_risk_engine import apply_weather_risk_to_option
 
 SimulationMode = Literal["road", "air", "sea", "hybrid"]
 LegMode = Literal["road", "air", "sea"]
+MAX_ROUTE_DISTANCE_MULTIPLIER = 2.5
+US_AIRPORT_MAX_DISTANCE_KM = 250.0
+US_AIRPORT_FALLBACK_DISTANCE_KM = 500.0
+US_SEAPORT_MAX_DISTANCE_KM = 120.0
+US_SEAPORT_FALLBACK_DISTANCE_KM = 260.0
 
 
 @dataclass(frozen=True)
@@ -176,6 +181,65 @@ def _hub_location(hub: Hub) -> Location:
     return _as_location(hub.name, hub.lat, hub.lng)
 
 
+def _is_us_route(origin: Location, destination: Location) -> bool:
+    return "United States" in origin.name and "United States" in destination.name
+
+
+def _preferred_country(origin: Location, destination: Location) -> str | None:
+    return "United States" if _is_us_route(origin, destination) else None
+
+
+def _route_distance_limit(direct_distance_km: float) -> float:
+    return max(direct_distance_km * MAX_ROUTE_DISTANCE_MULTIPLIER, direct_distance_km + 200.0)
+
+
+def _within_reasonable_distance(total_distance_km: float, direct_distance_km: float) -> bool:
+    return total_distance_km <= _route_distance_limit(direct_distance_km)
+
+
+def _filter_reasonable_candidates(
+    candidates: list[dict[str, object]],
+    direct_distance_km: float,
+) -> list[dict[str, object]]:
+    filtered = [
+        candidate
+        for candidate in candidates
+        if _within_reasonable_distance(
+            float(candidate["total_distance_km"]),
+            direct_distance_km,
+        )
+    ]
+    return filtered or candidates
+
+
+def _domestic_airports(origin: Location, destination: Location, *, for_origin: bool) -> list[Hub]:
+    preferred_country = _preferred_country(origin, destination)
+    reference = origin if for_origin else destination
+    return find_nearest_airports(
+        reference.lat,
+        reference.lng,
+        limit=3,
+        max_distance_km=US_AIRPORT_MAX_DISTANCE_KM if preferred_country else None,
+        fallback_distance_km=US_AIRPORT_FALLBACK_DISTANCE_KM if preferred_country else None,
+        preferred_country=preferred_country,
+        min_results=2,
+    )
+
+
+def _domestic_seaports(origin: Location, destination: Location, *, for_origin: bool) -> list[Hub]:
+    preferred_country = _preferred_country(origin, destination)
+    reference = origin if for_origin else destination
+    return find_nearest_seaports(
+        reference.lat,
+        reference.lng,
+        limit=3,
+        max_distance_km=US_SEAPORT_MAX_DISTANCE_KM if preferred_country else None,
+        fallback_distance_km=US_SEAPORT_FALLBACK_DISTANCE_KM if preferred_country else None,
+        preferred_country=preferred_country,
+        min_results=2,
+    )
+
+
 def _road_profiles() -> list[dict[str, object]]:
     return [
         {
@@ -264,20 +328,23 @@ def generate_road_options(origin: Location, destination: Location) -> list[dict[
 def _pick_unique_options(
     candidates: list[dict[str, object]],
     *,
-    name_builder: list[str],
-    sort_key_builders: list[tuple[str, Callable[[dict[str, object]], object]]],
+    option_specs: list[tuple[str, str, Callable[[dict[str, object]], object]]],
 ) -> list[dict[str, object]]:
     chosen: list[dict[str, object]] = []
     used_ids: set[str] = set()
 
-    for index, (option_name, sorter) in enumerate(zip(name_builder, sort_key_builders, strict=True)):
-        _, key_builder = sorter
+    for option_id, option_name, key_builder in option_specs:
         for candidate in sorted(candidates, key=key_builder):
             candidate_id = str(candidate["id"])
             if candidate_id in used_ids:
                 continue
 
-            chosen_candidate = {**candidate, "name": option_name, "label": option_name}
+            chosen_candidate = {
+                **candidate,
+                "id": option_id,
+                "name": option_name,
+                "label": option_name,
+            }
             chosen.append(chosen_candidate)
             used_ids.add(candidate_id)
             break
@@ -286,9 +353,10 @@ def _pick_unique_options(
 
 
 def generate_air_options(origin: Location, destination: Location) -> list[dict[str, object]]:
-    candidates: list[dict[str, object]] = []
-    origin_airports = find_nearest_airports(origin.lat, origin.lng, limit=3)
-    destination_airports = find_nearest_airports(destination.lat, destination.lng, limit=3)
+    raw_candidates: list[dict[str, object]] = []
+    direct_distance = haversine_distance_km(origin.lat, origin.lng, destination.lat, destination.lng)
+    origin_airports = _domestic_airports(origin, destination, for_origin=True)
+    destination_airports = _domestic_airports(origin, destination, for_origin=False)
     for candidate_pair in build_air_route_candidates(
         origin_airports=origin_airports,
         destination_airports=destination_airports,
@@ -352,53 +420,52 @@ def generate_air_options(origin: Location, destination: Location) -> list[dict[s
             ),
         ]
         route_name = f"{origin.name} → {destination.name}"
-        candidates.append(
-            _summarize_option(
-                option_id=f"air-{origin_airport.code}-{destination_airport.code}",
-                name=f"Air via {origin_airport.code} → {destination_airport.code}",
-                mode="air",
-                mode_sequence=["road", "air", "road"],
-                route_name=route_name,
-                recommendation_reason=(
-                    f"Uses {origin_airport.code} and {destination_airport.code} for a clean airport-to-door air chain."
-                ),
-                legs=legs,
-                extra_fields={
-                    "origin": origin.name,
-                    "destination": destination.name,
-                    "selected_origin_airport": origin_airport.code,
-                    "selected_destination_airport": destination_airport.code,
-                    "first_road_leg": legs[0],
-                    "air_leg": legs[1],
-                    "final_road_leg": legs[2],
-                    "airport_handling_cost": total_handling_cost,
-                    "air_route_validation": candidate_pair.validation,
-                    "traffic_risk": max(first_traffic, final_traffic),
-                    "weather_risk": max(first_weather, final_weather),
-                },
-            )
+        option = _summarize_option(
+            option_id=f"air-{origin_airport.code}-{destination_airport.code}",
+            name=f"Air via {origin_airport.code} → {destination_airport.code}",
+            mode="air",
+            mode_sequence=["road", "air", "road"],
+            route_name=route_name,
+            recommendation_reason=(
+                f"Uses {origin_airport.code} and {destination_airport.code} for a clean airport-to-door air chain."
+            ),
+            legs=legs,
+            extra_fields={
+                "origin": origin.name,
+                "destination": destination.name,
+                "selected_origin_airport": origin_airport.code,
+                "selected_destination_airport": destination_airport.code,
+                "first_road_leg": legs[0],
+                "air_leg": legs[1],
+                "final_road_leg": legs[2],
+                "airport_handling_cost": total_handling_cost,
+                "air_route_validation": candidate_pair.validation,
+                "traffic_risk": max(first_traffic, final_traffic),
+                "weather_risk": max(first_weather, final_weather),
+            },
         )
+        raw_candidates.append(option)
+
+    candidates = _filter_reasonable_candidates(raw_candidates, direct_distance)
 
     options = _pick_unique_options(
         candidates,
-        name_builder=[
-            "Fastest Air Option",
-            "Cheapest Air Option",
-            "Safest Air Option",
-        ],
-        sort_key_builders=[
-            ("fastest", lambda candidate: (candidate["total_time_hours"], candidate["risk_score"])),
-            ("cheapest", lambda candidate: (candidate["total_cost_usd"], candidate["risk_score"])),
-            ("safest", lambda candidate: (candidate["risk_score"], candidate["total_time_hours"])),
+        option_specs=[
+            ("air-fastest", "Fastest Air Option", lambda candidate: (candidate["total_time_hours"], candidate["risk_score"])),
+            ("air-cheapest", "Cheapest Air Option", lambda candidate: (candidate["total_cost_usd"], candidate["risk_score"])),
+            ("air-safest", "Safest Air Option", lambda candidate: (candidate["risk_score"], candidate["total_time_hours"])),
         ],
     )
     return options
 
 
 def generate_sea_options(origin: Location, destination: Location) -> list[dict[str, object]]:
-    candidates: list[dict[str, object]] = []
-    for origin_port in find_nearest_seaports(origin.lat, origin.lng, limit=3):
-        for destination_port in find_nearest_seaports(destination.lat, destination.lng, limit=3):
+    raw_candidates: list[dict[str, object]] = []
+    direct_distance = haversine_distance_km(origin.lat, origin.lng, destination.lat, destination.lng)
+    for origin_port in _domestic_seaports(origin, destination, for_origin=True):
+        for destination_port in _domestic_seaports(origin, destination, for_origin=False):
+            if origin_port.code == destination_port.code:
+                continue
             total_handling_cost = _round_cost(PORT_HANDLING_COST_USD * 2)
             first_distance = haversine_distance_km(origin.lat, origin.lng, origin_port.lat, origin_port.lng)
             sea_route = build_estimated_sea_route(origin_port, destination_port)
@@ -457,52 +524,48 @@ def generate_sea_options(origin: Location, destination: Location) -> list[dict[s
                 ),
             ]
             route_name = f"{origin.name} → {destination.name}"
-            candidates.append(
-                _summarize_option(
-                    option_id=f"sea-{origin_port.code}-{destination_port.code}",
-                    name=f"Sea via {origin_port.code} → {destination_port.code}",
-                    mode="sea",
-                    mode_sequence=["road", "sea", "road"],
-                    route_name=route_name,
-                    recommendation_reason=(
-                        f"Uses {origin_port.code} and {destination_port.code} for the lowest linehaul cost by sea."
-                    ),
-                    legs=legs,
-                    extra_fields={
-                        "origin": origin.name,
-                        "destination": destination.name,
-                        "selected_origin_port": origin_port.code,
-                        "selected_destination_port": destination_port.code,
-                        "first_road_leg": legs[0],
-                        "sea_leg": legs[1],
-                        "final_road_leg": legs[2],
-                        "port_handling_cost": total_handling_cost,
-                        "weather_risk": max(first_weather, final_weather),
-                    },
-                )
+            option = _summarize_option(
+                option_id=f"sea-{origin_port.code}-{destination_port.code}",
+                name=f"Sea via {origin_port.code} → {destination_port.code}",
+                mode="sea",
+                mode_sequence=["road", "sea", "road"],
+                route_name=route_name,
+                recommendation_reason=(
+                    f"Uses {origin_port.code} and {destination_port.code} for the lowest linehaul cost by sea."
+                ),
+                legs=legs,
+                extra_fields={
+                    "origin": origin.name,
+                    "destination": destination.name,
+                    "selected_origin_port": origin_port.code,
+                    "selected_destination_port": destination_port.code,
+                    "first_road_leg": legs[0],
+                    "sea_leg": legs[1],
+                    "final_road_leg": legs[2],
+                    "port_handling_cost": total_handling_cost,
+                    "weather_risk": max(first_weather, final_weather),
+                },
             )
+            raw_candidates.append(option)
+
+    candidates = _filter_reasonable_candidates(raw_candidates, direct_distance)
 
     options = _pick_unique_options(
         candidates,
-        name_builder=[
-            "Cheapest Sea Option",
-            "Balanced Sea Option",
-            "Safest Sea Option",
-        ],
-        sort_key_builders=[
-            ("cheapest", lambda candidate: (candidate["total_cost_usd"], candidate["risk_score"])),
-            ("balanced", lambda candidate: (candidate["score"], candidate["total_time_hours"])),
-            ("safest", lambda candidate: (candidate["risk_score"], candidate["total_time_hours"])),
+        option_specs=[
+            ("sea-cheapest", "Cheapest Sea Option", lambda candidate: (candidate["total_cost_usd"], candidate["risk_score"])),
+            ("sea-balanced", "Balanced Sea Option", lambda candidate: (candidate["score"], candidate["total_time_hours"])),
+            ("sea-safest", "Safest Sea Option", lambda candidate: (candidate["risk_score"], candidate["total_time_hours"])),
         ],
     )
     return options
 
 
 def generate_hybrid_options(origin: Location, destination: Location) -> list[dict[str, object]]:
-    origin_airport = find_nearest_airports(origin.lat, origin.lng, limit=1)[0]
-    destination_airport = find_nearest_airports(destination.lat, destination.lng, limit=1)[0]
-    origin_port = find_nearest_seaports(origin.lat, origin.lng, limit=1)[0]
-    destination_port = find_nearest_seaports(destination.lat, destination.lng, limit=1)[0]
+    origin_airport = _domestic_airports(origin, destination, for_origin=True)[0]
+    destination_airport = _domestic_airports(origin, destination, for_origin=False)[0]
+    origin_port = _domestic_seaports(origin, destination, for_origin=True)[0]
+    destination_port = _domestic_seaports(origin, destination, for_origin=False)[0]
 
     transfer_port = destination_port
     transfer_airport = destination_airport
@@ -655,7 +718,8 @@ def generate_hybrid_options(origin: Location, destination: Location) -> list[dic
             float(candidate["risk_score"]),
         )
 
-    return candidates
+    direct_distance = haversine_distance_km(origin.lat, origin.lng, destination.lat, destination.lng)
+    return _filter_reasonable_candidates(candidates, direct_distance)
 
 
 def _mark_best_option(options: list[dict[str, object]]) -> str:
