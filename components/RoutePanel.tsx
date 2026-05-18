@@ -11,6 +11,18 @@ export type SelectedRoute = {
   status: "best" | "high risk" | "medium risk" | "normal";
 };
 
+export type ShipmentProfileInput = {
+  cargoType: string;
+  goodsDescription: string;
+  priority: "low" | "standard" | "high" | "critical";
+  shipmentWeightKg: number;
+  shipmentVolumeCbm: number;
+  shipmentUnits: number;
+  palletCount: number;
+  hazardousMaterial: boolean;
+  coldChainRequired: boolean;
+};
+
 type RoutePanelProps = {
   route: SelectedRoute | null;
   isOpen: boolean;
@@ -25,12 +37,17 @@ type RoutePanelProps = {
   approvedOptionName: string | null;
   selectedOptionName: string | null;
   selectedMode: SimulationMode;
+  shipmentProfile: ShipmentProfileInput;
   onClose: () => void;
   onSimulate: () => void;
   onSelectMode: (mode: SimulationMode) => void;
   onApprove: (option: DecisionOption) => void;
   onSelectOption: (option: DecisionOption) => void;
   onViewOption: (option: DecisionOption) => void;
+  onShipmentFieldChange: (
+    field: keyof ShipmentProfileInput,
+    value: string | number | boolean,
+  ) => void;
 };
 
 const MODE_CARDS: Array<{
@@ -60,6 +77,28 @@ const MODE_CARDS: Array<{
   },
 ];
 
+function dedupeWeatherAlerts(alerts: NonNullable<DecisionOption["weather_risk"]>["alerts"]) {
+  const seen = new Set<string>();
+
+  return alerts.filter((alert) => {
+    const key =
+      alert.id ||
+      alert.event_id ||
+      alert.url ||
+      alert.headline ||
+      alert.description ||
+      alert.event ||
+      JSON.stringify(alert);
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
 export default function RoutePanel({
   route,
   isOpen,
@@ -74,16 +113,25 @@ export default function RoutePanel({
   approvedOptionName,
   selectedOptionName,
   selectedMode,
+  shipmentProfile,
   onClose,
   onSimulate,
   onSelectMode,
   onApprove,
   onSelectOption,
   onViewOption,
+  onShipmentFieldChange,
 }: RoutePanelProps) {
   if (!route || !isOpen) {
     return null;
   }
+
+  const weatherSamples = focusedOption?.weather_risk?.sampled_locations ?? [];
+  const riskExplanation = focusedOption?.weather_risk?.risk_explanation ?? [];
+  const dedupedWeatherAlerts = focusedOption?.weather_risk
+    ? dedupeWeatherAlerts(focusedOption.weather_risk.alerts).slice(0, 4)
+    : [];
+  const selectedOptionKey = focusedOption?.id ?? focusedOption?.name ?? "route-option";
 
   return (
     <aside
@@ -154,6 +202,156 @@ export default function RoutePanel({
             })}
           </div>
         </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <p className="text-sm text-slate-400">Shipment Profile</p>
+          <div className="mt-4 grid gap-3">
+            <label className="space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                Cargo Type
+              </span>
+              <input
+                value={shipmentProfile.cargoType}
+                onChange={(event) =>
+                  onShipmentFieldChange("cargoType", event.target.value)
+                }
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                Goods Description
+              </span>
+              <input
+                value={shipmentProfile.goodsDescription}
+                onChange={(event) =>
+                  onShipmentFieldChange("goodsDescription", event.target.value)
+                }
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+              />
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                  Priority
+                </span>
+                <select
+                  value={shipmentProfile.priority}
+                  onChange={(event) =>
+                    onShipmentFieldChange("priority", event.target.value)
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                >
+                  {["low", "standard", "high", "critical"].map((priority) => (
+                    <option key={priority} value={priority}>
+                      {priority}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                  Weight (kg)
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.1"
+                  value={shipmentProfile.shipmentWeightKg}
+                  onChange={(event) =>
+                    onShipmentFieldChange(
+                      "shipmentWeightKg",
+                      Number(event.target.value),
+                    )
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                  Volume (cbm)
+                </span>
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={shipmentProfile.shipmentVolumeCbm}
+                  onChange={(event) =>
+                    onShipmentFieldChange(
+                      "shipmentVolumeCbm",
+                      Number(event.target.value),
+                    )
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                  Units
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={shipmentProfile.shipmentUnits}
+                  onChange={(event) =>
+                    onShipmentFieldChange(
+                      "shipmentUnits",
+                      Number(event.target.value),
+                    )
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                  Pallets
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={shipmentProfile.palletCount}
+                  onChange={(event) =>
+                    onShipmentFieldChange(
+                      "palletCount",
+                      Number(event.target.value),
+                    )
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                />
+              </label>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={shipmentProfile.hazardousMaterial}
+                  onChange={(event) =>
+                    onShipmentFieldChange(
+                      "hazardousMaterial",
+                      event.target.checked,
+                    )
+                  }
+                />
+                Hazardous Material
+              </label>
+              <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={shipmentProfile.coldChainRequired}
+                  onChange={(event) =>
+                    onShipmentFieldChange(
+                      "coldChainRequired",
+                      event.target.checked,
+                    )
+                  }
+                />
+                Cold Chain Required
+              </label>
+            </div>
+          </div>
+        </div>
         <div className="pt-4">
           <button
             type="button"
@@ -207,9 +405,9 @@ export default function RoutePanel({
                   {focusedOption.weather_risk.summary}
                 </p>
                 <div className="mt-3 grid gap-2 text-xs text-sky-50/90">
-                  {focusedOption.weather_risk.sampled_locations.map((sample) => (
+                  {weatherSamples.map((sample, sampleIndex) => (
                     <div
-                      key={`${sample.lng}-${sample.lat}`}
+                      key={`${selectedOptionKey}-weather-point-${sampleIndex}`}
                       className="rounded-xl border border-white/10 bg-slate-950/30 p-3"
                     >
                       <p>
@@ -219,18 +417,22 @@ export default function RoutePanel({
                     </div>
                   ))}
                 </div>
-                {focusedOption.weather_risk.risk_explanation.length > 0 && (
+                {riskExplanation.length > 0 && (
                   <div className="mt-3 space-y-2 rounded-xl border border-white/10 bg-slate-950/30 p-3 text-xs text-sky-50/90">
-                    {focusedOption.weather_risk.risk_explanation.map((line) => (
-                      <p key={`${focusedOption.name}-${line}`}>{line}</p>
+                    {riskExplanation.map((line, lineIndex) => (
+                      <p
+                        key={`${selectedOptionKey}-risk-explanation-${lineIndex}`}
+                      >
+                        {line}
+                      </p>
                     ))}
                   </div>
                 )}
-                {focusedOption.weather_risk.alerts.length > 0 && (
+                {dedupedWeatherAlerts.length > 0 && (
                   <div className="mt-3 space-y-2">
-                    {focusedOption.weather_risk.alerts.slice(0, 4).map((alert) => (
+                    {dedupedWeatherAlerts.map((alert, alertIndex) => (
                       <div
-                        key={`${alert.id ?? alert.event ?? "alert"}-${alert.headline ?? ""}`}
+                        key={`${selectedOptionKey}-weather-alert-${alert.id ?? alert.event_id ?? alert.url ?? alertIndex}`}
                         className="rounded-xl border border-white/10 bg-slate-950/30 p-3 text-xs text-sky-50/90"
                       >
                         <p className="font-semibold text-white">

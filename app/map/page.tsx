@@ -15,7 +15,10 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { type DecisionOption } from "@/components/DecisionCards";
 import MapRouteDetails from "@/components/MapRouteDetails";
 import { useRealtime } from "@/components/RealtimeProvider";
-import RoutePanel, { type SelectedRoute } from "@/components/RoutePanel";
+import RoutePanel, {
+  type SelectedRoute,
+  type ShipmentProfileInput,
+} from "@/components/RoutePanel";
 import { fetchEvents, type LiveEvent } from "@/lib/events";
 import { getMapboxToken } from "@/lib/mapbox";
 import { fetchRoutes, type RouteRecord } from "@/lib/routes";
@@ -79,6 +82,17 @@ const DECISION_ROUTE_STYLES = [
 ] as const;
 
 const ROUTE_EVENT_RADIUS_KM = 250;
+const DEFAULT_SHIPMENT_PROFILE: ShipmentProfileInput = {
+  cargoType: "general",
+  goodsDescription: "General freight",
+  priority: "standard",
+  shipmentWeightKg: 1200,
+  shipmentVolumeCbm: 7.5,
+  shipmentUnits: 24,
+  palletCount: 4,
+  hazardousMaterial: false,
+  coldChainRequired: false,
+};
 
 function parseRouteDistance(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -337,6 +351,8 @@ function MapPageContent() {
   const [storedDestination, setStoredDestination] = useState<StoredLocation | null>(null);
   const [selectedSimulationMode, setSelectedSimulationMode] =
     useState<SimulationMode>("road");
+  const [shipmentProfile, setShipmentProfile] =
+    useState<ShipmentProfileInput>(DEFAULT_SHIPMENT_PROFILE);
   const [routeMode, setRouteMode] = useState<RouteMode>("batch");
   const [storageReady, setStorageReady] = useState(false);
 
@@ -624,6 +640,19 @@ function MapPageContent() {
 
   function stopSidebarScrollPropagation(event: UIEvent<HTMLElement>) {
     event.stopPropagation();
+  }
+
+  function updateShipmentField(
+    field: keyof ShipmentProfileInput,
+    value: string | number | boolean,
+  ) {
+    setShipmentProfile((currentProfile) => ({
+      ...currentProfile,
+      [field]:
+        typeof currentProfile[field] === "number"
+          ? Math.max(Number(value) || 0, 0)
+          : value,
+    }) as ShipmentProfileInput);
   }
 
   function buildOptionColorMap(options: SimulationOption[], bestOptionName?: string | null) {
@@ -1432,6 +1461,15 @@ const map = new mapboxgl.Map({
               origin_lng: originLng as number,
               destination_lat: destLat as number,
               destination_lng: destLng as number,
+              cargo_type: shipmentProfile.cargoType,
+              goods_description: shipmentProfile.goodsDescription,
+              shipment_weight_kg: shipmentProfile.shipmentWeightKg,
+              shipment_volume_cbm: shipmentProfile.shipmentVolumeCbm,
+              shipment_units: shipmentProfile.shipmentUnits,
+              pallet_count: shipmentProfile.palletCount,
+              hazardous_material: shipmentProfile.hazardousMaterial,
+              cold_chain_required: shipmentProfile.coldChainRequired,
+              priority: shipmentProfile.priority,
             }
           : {
               route_id:
@@ -1439,6 +1477,15 @@ const map = new mapboxgl.Map({
               distance_km: selectedRoute.distance ?? undefined,
               disruption_type: "weather",
               selected_mode: simulationMode,
+              cargo_type: shipmentProfile.cargoType,
+              goods_description: shipmentProfile.goodsDescription,
+              shipment_weight_kg: shipmentProfile.shipmentWeightKg,
+              shipment_volume_cbm: shipmentProfile.shipmentVolumeCbm,
+              shipment_units: shipmentProfile.shipmentUnits,
+              pallet_count: shipmentProfile.palletCount,
+              hazardous_material: shipmentProfile.hazardousMaterial,
+              cold_chain_required: shipmentProfile.coldChainRequired,
+              priority: shipmentProfile.priority,
             },
       );
 
@@ -1713,12 +1760,14 @@ const map = new mapboxgl.Map({
         approvedOptionName={approvedOptionName}
         selectedOptionName={focusedOption?.name ?? null}
         selectedMode={selectedSimulationMode}
+        shipmentProfile={shipmentProfile}
         onClose={handleClosePanel}
         onSimulate={() => void handleSimulateDisruption()}
         onSelectMode={handleSelectSimulationMode}
         onApprove={handleApproveDecision}
         onSelectOption={handleViewOption}
         onViewOption={handleViewOption}
+        onShipmentFieldChange={updateShipmentField}
       />
     </div>
   );

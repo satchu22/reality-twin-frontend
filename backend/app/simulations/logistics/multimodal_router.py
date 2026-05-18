@@ -44,6 +44,19 @@ class Location:
     lng: float
 
 
+@dataclass(frozen=True)
+class ShipmentProfile:
+    cargo_type: str
+    goods_description: str
+    priority: str
+    shipment_weight_kg: float
+    shipment_volume_cbm: float
+    shipment_units: int
+    pallet_count: int
+    hazardous_material: bool
+    cold_chain_required: bool
+
+
 def _round_distance(value: float) -> float:
     return round(value, 1)
 
@@ -179,6 +192,108 @@ def _as_location(name: str, lat: float, lng: float) -> Location:
 
 def _hub_location(hub: Hub) -> Location:
     return _as_location(hub.name, hub.lat, hub.lng)
+
+
+def _shipment_profile(
+    *,
+    cargo_type: str,
+    priority: str,
+    goods_description: str,
+    shipment_weight_kg: float,
+    shipment_volume_cbm: float,
+    shipment_units: int,
+    pallet_count: int,
+    hazardous_material: bool,
+    cold_chain_required: bool,
+) -> ShipmentProfile:
+    return ShipmentProfile(
+        cargo_type=(cargo_type or "general").strip().lower(),
+        goods_description=(goods_description or cargo_type or "General freight").strip(),
+        priority=priority or "standard",
+        shipment_weight_kg=max(shipment_weight_kg, 1.0),
+        shipment_volume_cbm=max(shipment_volume_cbm, 0.1),
+        shipment_units=max(shipment_units, 1),
+        pallet_count=max(pallet_count, 1),
+        hazardous_material=hazardous_material,
+        cold_chain_required=cold_chain_required,
+    )
+
+
+def _priority_multiplier(priority: str) -> float:
+    return {
+        "low": 0.92,
+        "standard": 1.0,
+        "high": 1.12,
+        "critical": 1.24,
+    }.get(priority, 1.0)
+
+
+def _shipment_handling_multiplier(shipment: ShipmentProfile) -> float:
+    multiplier = 1.0
+    if shipment.hazardous_material:
+        multiplier += 0.18
+    if shipment.cold_chain_required:
+        multiplier += 0.16
+    if shipment.cargo_type in {"pharma", "electronics", "perishable"}:
+        multiplier += 0.08
+    return multiplier
+
+
+def _chargeable_weight_kg(shipment: ShipmentProfile) -> float:
+    volumetric_weight = shipment.shipment_volume_cbm * 167.0
+    return max(shipment.shipment_weight_kg, volumetric_weight)
+
+
+def _shipment_capacity_utilization(shipment: ShipmentProfile) -> float:
+    return min(0.95, max(_chargeable_weight_kg(shipment) / 18000.0, shipment.shipment_volume_cbm / 95.0))
+
+
+def _shipment_assumptions(shipment: ShipmentProfile) -> dict[str, object]:
+    return {
+        "cargo_type": shipment.cargo_type,
+        "goods_description": shipment.goods_description,
+        "priority": shipment.priority,
+        "shipment_weight_kg": round(shipment.shipment_weight_kg, 1),
+        "shipment_volume_cbm": round(shipment.shipment_volume_cbm, 1),
+        "shipment_units": shipment.shipment_units,
+        "pallet_count": shipment.pallet_count,
+        "hazardous_material": shipment.hazardous_material,
+        "cold_chain_required": shipment.cold_chain_required,
+        "chargeable_weight_kg": round(_chargeable_weight_kg(shipment), 1),
+        "capacity_utilization_estimate": round(_shipment_capacity_utilization(shipment), 3),
+    }
+
+
+def _estimated_air_leg_cost(distance_km: float, handling_cost: float, shipment: ShipmentProfile) -> float:
+    shipment_factor = 0.55 + (_chargeable_weight_kg(shipment) / 1000.0) * 0.12
+    return round(
+        air_cost(distance_km, 0)
+        * shipment_factor
+        * _priority_multiplier(shipment.priority)
+        * _shipment_handling_multiplier(shipment)
+        + handling_cost,
+        0,
+    )
+
+
+def _estimated_air_leg_time(distance_km: float, shipment: ShipmentProfile, candidate_stops: int | None) -> float:
+    handling_hours = 6.0 * _priority_multiplier(shipment.priority)
+    if shipment.hazardous_material:
+        handling_hours += 1.5
+    if shipment.cold_chain_required:
+        handling_hours += 1.0
+    if candidate_stops:
+        handling_hours += candidate_stops * 1.2
+    return round(air_time_hours(distance_km, handling_hours), 1)
+
+
+def _estimated_air_handling_cost(shipment: ShipmentProfile) -> float:
+    return round(
+        AIRPORT_HANDLING_COST_USD
+        * _shipment_handling_multiplier(shipment)
+        * (1.0 + _shipment_capacity_utilization(shipment)),
+        0,
+    )
 
 
 def _is_us_route(origin: Location, destination: Location) -> bool:
@@ -352,7 +467,11 @@ def _pick_unique_options(
     return chosen
 
 
-def generate_air_options(origin: Location, destination: Location) -> list[dict[str, object]]:
+def generate_air_options(
+    origin: Location,
+    destination: Location,
+    shipment: ShipmentProfile,
+) -> list[dict[str, object]]:
     raw_candidates: list[dict[str, object]] = []
     direct_distance = haversine_distance_km(origin.lat, origin.lng, destination.lat, destination.lng)
     origin_airports = _domestic_airports(origin, destination, for_origin=True)
@@ -363,7 +482,7 @@ def generate_air_options(origin: Location, destination: Location) -> list[dict[s
     ):
         origin_airport = candidate_pair.origin_airport
         destination_airport = candidate_pair.destination_airport
-        total_handling_cost = _round_cost(AIRPORT_HANDLING_COST_USD * 2)
+        total_handling_cost = _round_cost(_estimated_air_handling_cost(shipment) * 2)
         first_distance = haversine_distance_km(origin.lat, origin.lng, origin_airport.lat, origin_airport.lng)
         air_distance = haversine_distance_km(origin_airport.lat, origin_airport.lng, destination_airport.lat, destination_airport.lng)
         final_distance = haversine_distance_km(destination_airport.lat, destination_airport.lng, destination.lat, destination.lng)
@@ -381,7 +500,10 @@ def generate_air_options(origin: Location, destination: Location) -> list[dict[s
             first_road_risk=first_risk,
             linehaul_distance_km=air_distance,
             final_road_risk=final_risk,
-            handling_complexity=18.0,
+            handling_complexity=18.0
+            + (_shipment_capacity_utilization(shipment) * 12.0)
+            + (8.0 if shipment.hazardous_material else 0.0)
+            + (6.0 if shipment.cold_chain_required else 0.0),
         )
         legs = [
             _build_leg(
@@ -399,8 +521,16 @@ def generate_air_options(origin: Location, destination: Location) -> list[dict[s
                 source=_hub_location(origin_airport),
                 destination=_hub_location(destination_airport),
                 distance_km=air_distance,
-                time_hours=air_time_hours(air_distance, 8.0),
-                cost_usd=air_cost(air_distance, total_handling_cost),
+                time_hours=_estimated_air_leg_time(
+                    air_distance,
+                    shipment,
+                    candidate_pair.stops,
+                ),
+                cost_usd=_estimated_air_leg_cost(
+                    air_distance,
+                    total_handling_cost,
+                    shipment,
+                ),
                 risk_score=air_total_risk,
                 purpose=(
                     f"Estimated air freight from {origin_airport.code} "
@@ -420,6 +550,11 @@ def generate_air_options(origin: Location, destination: Location) -> list[dict[s
             ),
         ]
         route_name = f"{origin.name} → {destination.name}"
+        carrier_label = (
+            ", ".join(candidate_pair.carriers[:2])
+            if candidate_pair.carriers
+            else "Estimated multi-carrier capacity"
+        )
         option = _summarize_option(
             option_id=f"air-{origin_airport.code}-{destination_airport.code}",
             name=f"Air via {origin_airport.code} → {destination_airport.code}",
@@ -430,19 +565,26 @@ def generate_air_options(origin: Location, destination: Location) -> list[dict[s
                 f"Uses {origin_airport.code} and {destination_airport.code} for a clean airport-to-door air chain."
             ),
             legs=legs,
-            extra_fields={
-                "origin": origin.name,
-                "destination": destination.name,
-                "selected_origin_airport": origin_airport.code,
-                "selected_destination_airport": destination_airport.code,
-                "first_road_leg": legs[0],
-                "air_leg": legs[1],
-                "final_road_leg": legs[2],
-                "airport_handling_cost": total_handling_cost,
-                "air_route_validation": candidate_pair.validation,
-                "traffic_risk": max(first_traffic, final_traffic),
-                "weather_risk": max(first_weather, final_weather),
-            },
+                extra_fields={
+                    "origin": origin.name,
+                    "destination": destination.name,
+                    "selected_origin_airport": origin_airport.code,
+                    "selected_origin_airport_name": origin_airport.name,
+                    "selected_destination_airport": destination_airport.code,
+                    "selected_destination_airport_name": destination_airport.name,
+                    "first_road_leg": legs[0],
+                    "air_leg": legs[1],
+                    "final_road_leg": legs[2],
+                    "airport_handling_cost": total_handling_cost,
+                    "air_route_validation": candidate_pair.validation,
+                    "route_possibility": candidate_pair.validation,
+                    "carrier": carrier_label,
+                    "carrier_codes": list(candidate_pair.carriers),
+                    "stops": candidate_pair.stops,
+                    "shipment_assumptions": _shipment_assumptions(shipment),
+                    "traffic_risk": max(first_traffic, final_traffic),
+                    "weather_risk": max(first_weather, final_weather),
+                },
         )
         raw_candidates.append(option)
 
@@ -561,7 +703,11 @@ def generate_sea_options(origin: Location, destination: Location) -> list[dict[s
     return options
 
 
-def generate_hybrid_options(origin: Location, destination: Location) -> list[dict[str, object]]:
+def generate_hybrid_options(
+    origin: Location,
+    destination: Location,
+    shipment: ShipmentProfile,
+) -> list[dict[str, object]]:
     origin_airport = _domestic_airports(origin, destination, for_origin=True)[0]
     destination_airport = _domestic_airports(origin, destination, for_origin=False)[0]
     origin_port = _domestic_seaports(origin, destination, for_origin=True)[0]
@@ -572,7 +718,7 @@ def generate_hybrid_options(origin: Location, destination: Location) -> list[dic
 
     candidates: list[dict[str, object]] = []
 
-    air_bridge = generate_air_options(origin, destination)[0]
+    air_bridge = generate_air_options(origin, destination, shipment)[0]
     candidates.append(
         {
             **air_bridge,
@@ -739,23 +885,48 @@ def generate_mode_simulation(
     destination_lat: float,
     destination_lng: float,
     selected_mode: SimulationMode,
+    cargo_type: str = "general",
+    priority: str = "standard",
+    goods_description: str = "General freight",
+    shipment_weight_kg: float = 1200.0,
+    shipment_volume_cbm: float = 7.5,
+    shipment_units: int = 24,
+    pallet_count: int = 4,
+    hazardous_material: bool = False,
+    cold_chain_required: bool = False,
 ) -> dict[str, object]:
     origin = _as_location(origin_name, origin_lat, origin_lng)
     destination = _as_location(destination_name, destination_lat, destination_lng)
+    shipment = _shipment_profile(
+        cargo_type=cargo_type,
+        priority=priority,
+        goods_description=goods_description,
+        shipment_weight_kg=shipment_weight_kg,
+        shipment_volume_cbm=shipment_volume_cbm,
+        shipment_units=shipment_units,
+        pallet_count=pallet_count,
+        hazardous_material=hazardous_material,
+        cold_chain_required=cold_chain_required,
+    )
 
-    generators = {
-        "road": generate_road_options,
-        "air": generate_air_options,
-        "sea": generate_sea_options,
-        "hybrid": generate_hybrid_options,
-    }
-    options = generators[selected_mode](origin, destination)
+    if selected_mode == "road":
+        options = generate_road_options(origin, destination)
+    elif selected_mode == "air":
+        options = generate_air_options(origin, destination, shipment)
+    elif selected_mode == "sea":
+        options = generate_sea_options(origin, destination)
+    else:
+        options = generate_hybrid_options(origin, destination, shipment)
     for option in options:
         apply_weather_risk_to_option(option)
         option["score"] = _score_option(
             float(option["total_time_hours"]),
             float(option["total_cost_usd"]),
             float(option["risk_score"]),
+        )
+        option["shipment_assumptions"] = option.get(
+            "shipment_assumptions",
+            _shipment_assumptions(shipment),
         )
     best_name = _mark_best_option(options)
     best_option = next(option for option in options if option["name"] == best_name)

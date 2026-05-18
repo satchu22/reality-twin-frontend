@@ -72,6 +72,13 @@ class RouteContext:
     distance_km: float
     cargo_type: str
     priority: str
+    goods_description: str
+    shipment_weight_kg: float
+    shipment_volume_cbm: float
+    shipment_units: int
+    pallet_count: int
+    hazardous_material: bool
+    cold_chain_required: bool
 
 
 def _coerce_positive_number(value: Any) -> float | None:
@@ -84,6 +91,16 @@ def _coerce_coordinate(value: Any) -> float | None:
     if isinstance(value, (int, float)) and math.isfinite(value):
         return float(value)
     return None
+
+
+def _coerce_int(value: Any, *, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, float) and math.isfinite(value) and value > 0:
+        return int(value)
+    return default
 
 
 def _calculate_distance_km_from_coordinates(
@@ -440,6 +457,13 @@ def _resolve_route_context(db: Session, route) -> RouteContext:
             distance_km=distance_km,
             cargo_type=(route.cargo_type or "general").strip().lower(),
             priority=route.priority,
+            goods_description=(route.goods_description or route.cargo_type or "General freight").strip(),
+            shipment_weight_kg=_coerce_positive_number(getattr(route, "shipment_weight_kg", None)) or 1200.0,
+            shipment_volume_cbm=_coerce_positive_number(getattr(route, "shipment_volume_cbm", None)) or 7.5,
+            shipment_units=_coerce_int(getattr(route, "shipment_units", None), default=24),
+            pallet_count=_coerce_int(getattr(route, "pallet_count", None), default=4),
+            hazardous_material=bool(getattr(route, "hazardous_material", False)),
+            cold_chain_required=bool(getattr(route, "cold_chain_required", False)),
         )
 
     distance_km = _derive_distance_km(route)
@@ -459,6 +483,13 @@ def _resolve_route_context(db: Session, route) -> RouteContext:
         distance_km=distance_km,
         cargo_type=(route.cargo_type or "general").strip().lower(),
         priority=route.priority,
+        goods_description=(route.goods_description or route.cargo_type or "General freight").strip(),
+        shipment_weight_kg=_coerce_positive_number(getattr(route, "shipment_weight_kg", None)) or 1200.0,
+        shipment_volume_cbm=_coerce_positive_number(getattr(route, "shipment_volume_cbm", None)) or 7.5,
+        shipment_units=_coerce_int(getattr(route, "shipment_units", None), default=24),
+        pallet_count=_coerce_int(getattr(route, "pallet_count", None), default=4),
+        hazardous_material=bool(getattr(route, "hazardous_material", False)),
+        cold_chain_required=bool(getattr(route, "cold_chain_required", False)),
     )
 
 
@@ -646,6 +677,15 @@ def run_route_simulation(db: Session, route) -> dict[str, object]:
             destination_lat=context.dest_lat,
             destination_lng=context.dest_lng,
             selected_mode=getattr(route, "selected_mode", "road"),
+            cargo_type=context.cargo_type,
+            priority=context.priority,
+            goods_description=context.goods_description,
+            shipment_weight_kg=context.shipment_weight_kg,
+            shipment_volume_cbm=context.shipment_volume_cbm,
+            shipment_units=context.shipment_units,
+            pallet_count=context.pallet_count,
+            hazardous_material=context.hazardous_material,
+            cold_chain_required=context.cold_chain_required,
         )
         payload = {
             "route_id": context.route_id,

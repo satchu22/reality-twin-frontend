@@ -24,6 +24,13 @@ export type SimulationRequest = {
   destination_latitude?: number;
   destination_longitude?: number;
   cargo_type?: string;
+  goods_description?: string;
+  shipment_weight_kg?: number;
+  shipment_volume_cbm?: number;
+  shipment_units?: number;
+  pallet_count?: number;
+  hazardous_material?: boolean;
+  cold_chain_required?: boolean;
   priority?: "low" | "standard" | "high" | "critical";
 };
 
@@ -47,6 +54,9 @@ export type WeatherRisk = {
   summary: string;
   alerts: Array<{
     id?: string | null;
+    event_id?: string | null;
+    url?: string | null;
+    source?: string;
     event?: string;
     severity?: string;
     certainty?: string;
@@ -92,6 +102,29 @@ export type SimulationOption = {
   total_cost_usd: number;
   estimated_time_hours?: number;
   estimated_cost_usd?: number;
+  selected_origin_airport?: string;
+  selected_origin_airport_name?: string;
+  selected_destination_airport?: string;
+  selected_destination_airport_name?: string;
+  carrier?: string;
+  carrier_codes?: string[];
+  route_possibility?: string;
+  air_route_validation?: string;
+  airport_handling_cost?: number;
+  stops?: number | null;
+  shipment_assumptions?: {
+    cargo_type: string;
+    goods_description: string;
+    priority: string;
+    shipment_weight_kg: number;
+    shipment_volume_cbm: number;
+    shipment_units: number;
+    pallet_count: number;
+    hazardous_material: boolean;
+    cold_chain_required: boolean;
+    chargeable_weight_kg: number;
+    capacity_utilization_estimate: number;
+  };
   recommendation_reason: string;
   weather_risk?: WeatherRisk;
   risk: "low" | "medium" | "high";

@@ -33,6 +33,13 @@ class RouteSimulationRequest(BaseModel):
         validation_alias=AliasChoices("destination_longitude", "destination_lng"),
     )
     cargo_type: str | None = None
+    goods_description: str | None = None
+    shipment_weight_kg: float | None = Field(default=None, gt=0)
+    shipment_volume_cbm: float | None = Field(default=None, gt=0)
+    shipment_units: int | None = Field(default=None, gt=0)
+    pallet_count: int | None = Field(default=None, gt=0)
+    hazardous_material: bool = False
+    cold_chain_required: bool = False
     priority: Literal["low", "standard", "high", "critical"] = "standard"
 
     @model_validator(mode="after")

@@ -47,15 +47,16 @@ export default function DecisionCards({
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-4 xl:grid-cols-3">
       {options.map((option) => {
         const isBest = (bestOptionName || options[0]?.name) === option.name;
         const isApproved = approvedOptionName === option.name;
         const isSelected = selectedOptionName === option.name;
+        const optionKey = option.id ?? option.name;
 
         return (
           <article
-            key={option.name}
+            key={optionKey}
             role="button"
             tabIndex={0}
             onClick={() => onSelectOption?.(option)}
@@ -156,6 +157,58 @@ export default function DecisionCards({
               </div>
             </div>
 
+            {option.mode === "air" && (
+              <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                  Air Freight Detail
+                </p>
+                <div className="mt-3 space-y-2 text-sm text-slate-300">
+                  <p>
+                    {option.selected_origin_airport ?? "Origin airport"} (
+                    {option.selected_origin_airport_name ?? "Unknown"})
+                    {" -> "}
+                    {option.selected_destination_airport ?? "Destination airport"} (
+                    {option.selected_destination_airport_name ?? "Unknown"})
+                  </p>
+                  <p>Carrier: {option.carrier ?? "Estimated multi-carrier capacity"}</p>
+                  <p>
+                    Route possibility: {option.route_possibility ?? option.air_route_validation ?? "estimated_air_pair"}
+                  </p>
+                  <p>
+                    Stops: {option.stops ?? 0} · Handling:{" "}
+                    {option.airport_handling_cost !== undefined
+                      ? formatCurrency(option.airport_handling_cost)
+                      : "Included in total"}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {option.shipment_assumptions && (
+              <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                  Shipment Assumptions
+                </p>
+                <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+                  <p>{option.shipment_assumptions.goods_description}</p>
+                  <p className="capitalize">
+                    Priority: {option.shipment_assumptions.priority}
+                  </p>
+                  <p>{option.shipment_assumptions.shipment_weight_kg} kg</p>
+                  <p>{option.shipment_assumptions.shipment_volume_cbm} cbm</p>
+                  <p>{option.shipment_assumptions.shipment_units} units</p>
+                  <p>{option.shipment_assumptions.pallet_count} pallets</p>
+                  <p>
+                    Chargeable: {option.shipment_assumptions.chargeable_weight_kg} kg
+                  </p>
+                  <p>
+                    Capacity use:{" "}
+                    {(option.shipment_assumptions.capacity_utilization_estimate * 100).toFixed(0)}%
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
                 Route Chain
@@ -163,7 +216,7 @@ export default function DecisionCards({
               <div className="mt-3 space-y-3">
                 {option.legs.map((step, index) => (
                   <div
-                    key={`${option.name}-${step.mode}-${index}`}
+                    key={`${optionKey}-leg-${index}-${step.mode}`}
                     className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300"
                   >
                     <div className="flex items-center justify-between gap-3">
