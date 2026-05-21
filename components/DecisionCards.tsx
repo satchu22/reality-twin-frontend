@@ -170,15 +170,76 @@ export default function DecisionCards({
                     {option.selected_destination_airport ?? "Destination airport"} (
                     {option.selected_destination_airport_name ?? "Unknown"})
                   </p>
-                  <p>Carrier: {option.carrier ?? "Estimated multi-carrier capacity"}</p>
+                  <p>
+                    Airport pair:{" "}
+                    {option.selected_origin_airport ?? "Origin"} →{" "}
+                    {option.selected_destination_airport ?? "Destination"}
+                  </p>
+                  <p className="capitalize">
+                    Service level: {option.shipment?.service_level ?? "standard"}
+                  </p>
+                  <p className="capitalize">
+                    Goods type:{" "}
+                    {option.shipment?.commodity_type ??
+                      option.shipment_assumptions?.commodity_type ??
+                      "general"}
+                  </p>
+                  <p>
+                    Actual weight:{" "}
+                    {option.chargeable_weight?.actual_weight_kg ??
+                      option.shipment_assumptions?.actual_weight_kg ??
+                      option.shipment?.weight_kg ??
+                      "Unavailable"}{" "}
+                    kg
+                  </p>
+                  <p>
+                    Volume:{" "}
+                    {option.chargeable_weight?.volume_cbm ??
+                      option.shipment?.volume_cbm ??
+                      option.shipment_assumptions?.volume_cbm ??
+                      "Unavailable"}{" "}
+                    cbm
+                  </p>
+                  <p>
+                    Chargeable weight:{" "}
+                    {option.chargeable_weight?.chargeable_weight_kg ??
+                      option.shipment_assumptions?.chargeable_weight_kg ??
+                      "Unavailable"}{" "}
+                    kg
+                  </p>
                   <p>
                     Route possibility: {option.route_possibility ?? option.air_route_validation ?? "estimated_air_pair"}
+                  </p>
+                  {option.route_validation && (
+                    <p>
+                      Validation: {option.route_validation.source} ·{" "}
+                      {option.route_validation.direct_route_known ? "direct" : `${option.route_validation.stops} stop`}
+                    </p>
+                  )}
+                  {option.route_validation?.possible_airlines?.length ? (
+                    <p>
+                      Possible airlines:{" "}
+                      {option.route_validation.possible_airlines.slice(0, 3).join(", ")}
+                    </p>
+                  ) : null}
+                  <p>
+                    Feasibility:{" "}
+                    {option.feasibility?.feasible ? "Feasible" : "Needs review"} ·
+                    Confidence{" "}
+                    {Math.round(
+                      option.confidence_score ??
+                        option.feasibility?.confidence_score ??
+                        0,
+                    )}
                   </p>
                   <p>
                     Stops: {option.stops ?? 0} · Handling:{" "}
                     {option.airport_handling_cost !== undefined
                       ? formatCurrency(option.airport_handling_cost)
                       : "Included in total"}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Estimated freight model for shipment planning and simulation.
                   </p>
                 </div>
               </div>
@@ -194,16 +255,28 @@ export default function DecisionCards({
                   <p className="capitalize">
                     Priority: {option.shipment_assumptions.priority}
                   </p>
-                  <p>{option.shipment_assumptions.shipment_weight_kg} kg</p>
-                  <p>{option.shipment_assumptions.shipment_volume_cbm} cbm</p>
-                  <p>{option.shipment_assumptions.shipment_units} units</p>
+                  <p>{option.shipment_assumptions.weight_kg} kg</p>
+                  <p>{option.shipment_assumptions.volume_cbm} cbm</p>
+                  <p>{option.shipment_assumptions.pieces} pieces</p>
                   <p>{option.shipment_assumptions.pallet_count} pallets</p>
+                  <p>${option.shipment_assumptions.declared_value_usd} declared</p>
+                  <p className="capitalize">
+                    Service: {option.shipment_assumptions.service_level}
+                  </p>
                   <p>
                     Chargeable: {option.shipment_assumptions.chargeable_weight_kg} kg
                   </p>
                   <p>
                     Capacity use:{" "}
                     {(option.shipment_assumptions.capacity_utilization_estimate * 100).toFixed(0)}%
+                  </p>
+                  <p>
+                    Temp: {option.shipment_assumptions.temperature_controlled ? "Yes" : "No"}
+                  </p>
+                  <p>Fragile: {option.shipment_assumptions.fragile ? "Yes" : "No"}</p>
+                  <p>Hazardous: {option.shipment_assumptions.hazardous ? "Yes" : "No"}</p>
+                  <p>
+                    Insurance: {option.shipment_assumptions.insurance_required ? "Yes" : "No"}
                   </p>
                 </div>
               </div>

@@ -12,15 +12,29 @@ export type SelectedRoute = {
 };
 
 export type ShipmentProfileInput = {
-  cargoType: string;
+  commodityType:
+    | "general"
+    | "electronics"
+    | "food"
+    | "pharma"
+    | "documents"
+    | "automotive"
+    | "machinery"
+    | "apparel"
+    | "perishable"
+    | "hazardous";
   goodsDescription: string;
-  priority: "low" | "standard" | "high" | "critical";
-  shipmentWeightKg: number;
-  shipmentVolumeCbm: number;
-  shipmentUnits: number;
+  priority: "cheapest" | "fastest" | "safest" | "balanced";
+  weightKg: number;
+  volumeCbm: number;
+  pieces: number;
+  declaredValueUsd: number;
   palletCount: number;
-  hazardousMaterial: boolean;
-  coldChainRequired: boolean;
+  temperatureControlled: boolean;
+  fragile: boolean;
+  hazardous: boolean;
+  serviceLevel: "standard" | "express" | "economy";
+  insuranceRequired: boolean;
 };
 
 type RoutePanelProps = {
@@ -132,6 +146,12 @@ export default function RoutePanel({
     ? dedupeWeatherAlerts(focusedOption.weather_risk.alerts).slice(0, 4)
     : [];
   const selectedOptionKey = focusedOption?.id ?? focusedOption?.name ?? "route-option";
+  const feasibility = focusedOption?.air_feasibility ?? focusedOption?.feasibility;
+  const costBreakdown =
+    focusedOption?.air_freight_cost_breakdown ?? focusedOption?.cost_breakdown;
+  const timeBreakdown = focusedOption?.air_time_breakdown;
+  const chargeableWeight =
+    focusedOption?.chargeable_weight ?? focusedOption?.shipment_assumptions;
 
   return (
     <aside
@@ -204,153 +224,212 @@ export default function RoutePanel({
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <p className="text-sm text-slate-400">Shipment Profile</p>
-          <div className="mt-4 grid gap-3">
-            <label className="space-y-2">
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm">
+              <span className="font-medium text-white">Shipment Details</span>
               <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                Cargo Type
+                Configure
               </span>
-              <input
-                value={shipmentProfile.cargoType}
-                onChange={(event) =>
-                  onShipmentFieldChange("cargoType", event.target.value)
-                }
-                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
-              />
-            </label>
-            <label className="space-y-2">
-              <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                Goods Description
-              </span>
-              <input
-                value={shipmentProfile.goodsDescription}
-                onChange={(event) =>
-                  onShipmentFieldChange("goodsDescription", event.target.value)
-                }
-                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
-              />
-            </label>
-            <div className="grid gap-3 sm:grid-cols-2">
+            </summary>
+            <div className="mt-4 grid gap-3">
               <label className="space-y-2">
                 <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                  Priority
+                  Goods Type
                 </span>
                 <select
-                  value={shipmentProfile.priority}
+                  value={shipmentProfile.commodityType}
                   onChange={(event) =>
-                    onShipmentFieldChange("priority", event.target.value)
+                    onShipmentFieldChange("commodityType", event.target.value)
                   }
                   className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
                 >
-                  {["low", "standard", "high", "critical"].map((priority) => (
-                    <option key={priority} value={priority}>
-                      {priority}
+                  {[
+                    "general",
+                    "electronics",
+                    "food",
+                    "pharma",
+                    "documents",
+                    "automotive",
+                    "machinery",
+                    "apparel",
+                    "perishable",
+                    "hazardous",
+                  ].map((type) => (
+                    <option key={type} value={type}>
+                      {type}
                     </option>
                   ))}
                 </select>
               </label>
               <label className="space-y-2">
                 <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                  Weight (kg)
+                  Goods Description
                 </span>
                 <input
-                  type="number"
-                  min="1"
-                  step="0.1"
-                  value={shipmentProfile.shipmentWeightKg}
+                  value={shipmentProfile.goodsDescription}
                   onChange={(event) =>
-                    onShipmentFieldChange(
-                      "shipmentWeightKg",
-                      Number(event.target.value),
-                    )
+                    onShipmentFieldChange("goodsDescription", event.target.value)
                   }
                   className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
                 />
               </label>
-              <label className="space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                  Volume (cbm)
-                </span>
-                <input
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  value={shipmentProfile.shipmentVolumeCbm}
-                  onChange={(event) =>
-                    onShipmentFieldChange(
-                      "shipmentVolumeCbm",
-                      Number(event.target.value),
-                    )
-                  }
-                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
-                />
-              </label>
-              <label className="space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                  Units
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={shipmentProfile.shipmentUnits}
-                  onChange={(event) =>
-                    onShipmentFieldChange(
-                      "shipmentUnits",
-                      Number(event.target.value),
-                    )
-                  }
-                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
-                />
-              </label>
-              <label className="space-y-2">
-                <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                  Pallets
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={shipmentProfile.palletCount}
-                  onChange={(event) =>
-                    onShipmentFieldChange(
-                      "palletCount",
-                      Number(event.target.value),
-                    )
-                  }
-                  className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
-                />
-              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                    Priority
+                  </span>
+                  <select
+                    value={shipmentProfile.priority}
+                    onChange={(event) =>
+                      onShipmentFieldChange("priority", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                  >
+                    {["cheapest", "balanced", "fastest", "safest"].map((priority) => (
+                      <option key={priority} value={priority}>
+                        {priority}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                    Service Level
+                  </span>
+                  <select
+                    value={shipmentProfile.serviceLevel}
+                    onChange={(event) =>
+                      onShipmentFieldChange("serviceLevel", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                  >
+                    {["standard", "express", "economy"].map((serviceLevel) => (
+                      <option key={serviceLevel} value={serviceLevel}>
+                        {serviceLevel}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                    Weight (kg)
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.1"
+                    value={shipmentProfile.weightKg}
+                    onChange={(event) =>
+                      onShipmentFieldChange("weightKg", Number(event.target.value))
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                    Volume (cbm)
+                  </span>
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={shipmentProfile.volumeCbm}
+                    onChange={(event) =>
+                      onShipmentFieldChange("volumeCbm", Number(event.target.value))
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                    Number of Pieces
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={shipmentProfile.pieces}
+                    onChange={(event) =>
+                      onShipmentFieldChange("pieces", Number(event.target.value))
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                    Declared Value (USD)
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={shipmentProfile.declaredValueUsd}
+                    onChange={(event) =>
+                      onShipmentFieldChange("declaredValueUsd", Number(event.target.value))
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                    Pallets
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={shipmentProfile.palletCount}
+                    onChange={(event) =>
+                      onShipmentFieldChange("palletCount", Number(event.target.value))
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+                  />
+                </label>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={shipmentProfile.temperatureControlled}
+                    onChange={(event) =>
+                      onShipmentFieldChange("temperatureControlled", event.target.checked)
+                    }
+                  />
+                  Temperature Controlled
+                </label>
+                <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={shipmentProfile.fragile}
+                    onChange={(event) =>
+                      onShipmentFieldChange("fragile", event.target.checked)
+                    }
+                  />
+                  Fragile
+                </label>
+                <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={shipmentProfile.hazardous}
+                    onChange={(event) =>
+                      onShipmentFieldChange("hazardous", event.target.checked)
+                    }
+                  />
+                  Hazardous
+                </label>
+                <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={shipmentProfile.insuranceRequired}
+                    onChange={(event) =>
+                      onShipmentFieldChange("insuranceRequired", event.target.checked)
+                    }
+                  />
+                  Insurance Required
+                </label>
+              </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={shipmentProfile.hazardousMaterial}
-                  onChange={(event) =>
-                    onShipmentFieldChange(
-                      "hazardousMaterial",
-                      event.target.checked,
-                    )
-                  }
-                />
-                Hazardous Material
-              </label>
-              <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={shipmentProfile.coldChainRequired}
-                  onChange={(event) =>
-                    onShipmentFieldChange(
-                      "coldChainRequired",
-                      event.target.checked,
-                    )
-                  }
-                />
-                Cold Chain Required
-              </label>
-            </div>
-          </div>
+          </details>
         </div>
         <div className="pt-4">
           <button
@@ -395,6 +474,155 @@ export default function RoutePanel({
               routeOptions={decisionOptions}
               events={detectedEvents}
             />
+
+            {focusedOption?.mode === "air" && (
+              <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                  <p className="text-sm font-semibold text-white">Shipment Summary</p>
+                  <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+                    <p>{focusedOption.shipment?.goods_description ?? "General freight"}</p>
+                    <p className="capitalize">
+                      Goods type:{" "}
+                      {focusedOption.shipment?.commodity_type ??
+                        focusedOption.shipment_assumptions?.commodity_type ??
+                        "general"}
+                    </p>
+                    <p>
+                      Weight:{" "}
+                      {focusedOption.shipment?.weight_kg ??
+                        focusedOption.shipment_assumptions?.weight_kg ??
+                        0}{" "}
+                      kg
+                    </p>
+                    <p>
+                      Volume:{" "}
+                      {focusedOption.shipment?.volume_cbm ??
+                        focusedOption.shipment_assumptions?.volume_cbm ??
+                        0}{" "}
+                      cbm
+                    </p>
+                    <p>
+                      Chargeable weight:{" "}
+                      {chargeableWeight?.chargeable_weight_kg ?? "Unavailable"} kg
+                    </p>
+                    <p className="capitalize">
+                      Service level: {focusedOption.shipment?.service_level ?? "standard"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                  <p className="text-sm font-semibold text-white">Airport Selection Reasoning</p>
+                  <div className="mt-3 space-y-2 text-sm text-slate-300">
+                    <p>
+                      Airport pair:{" "}
+                      {focusedOption.selected_origin_airport ?? "Origin"} →{" "}
+                      {focusedOption.selected_destination_airport ?? "Destination"}
+                    </p>
+                    <p>
+                      Airline/carrier: {focusedOption.airline ?? focusedOption.carrier ?? "Estimated multi-carrier capacity"}
+                    </p>
+                    <p>
+                      Service level: {focusedOption.shipment?.service_level ?? "standard"}
+                    </p>
+                    <p>{focusedOption.recommendation_reason}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                  <p className="text-sm font-semibold text-white">Route Validation</p>
+                  <div className="mt-3 space-y-2 text-sm text-slate-300">
+                    <p>{focusedOption.route_possibility ?? "Estimated freight model"}</p>
+                    <p>
+                      Source: {focusedOption.route_validation?.source ?? "estimated"} ·{" "}
+                      {focusedOption.route_validation?.direct_route_known
+                        ? "Direct route known"
+                        : `${focusedOption.route_validation?.stops ?? 0} stop assumption`}
+                    </p>
+                    {focusedOption.route_validation?.possible_airlines?.length ? (
+                      <p>
+                        Possible airlines:{" "}
+                        {focusedOption.route_validation.possible_airlines.join(", ")}
+                      </p>
+                    ) : null}
+                    <p className="text-xs text-slate-400">
+                      Estimated freight model for shipment planning and simulation.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                  <p className="text-sm font-semibold text-white">Chargeable Weight Calculation</p>
+                  <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+                    <p>
+                      Actual Weight:{" "}
+                      {chargeableWeight?.actual_weight_kg ??
+                        focusedOption.shipment?.weight_kg ??
+                        0}{" "}
+                      kg
+                    </p>
+                    <p>
+                      Volume:{" "}
+                      {chargeableWeight?.volume_cbm ??
+                        focusedOption.shipment?.volume_cbm ??
+                        0}{" "}
+                      cbm
+                    </p>
+                    <p>
+                      Dimensional Weight:{" "}
+                      {chargeableWeight?.dimensional_weight_kg ?? "Unavailable"} kg
+                    </p>
+                    <p>
+                      Chargeable Weight:{" "}
+                      {chargeableWeight?.chargeable_weight_kg ?? "Unavailable"} kg
+                    </p>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-400">
+                    {chargeableWeight?.calculation_note ??
+                      "Chargeable weight is the greater of actual weight and dimensional weight."}
+                  </p>
+                </div>
+
+                {costBreakdown && (
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                    <p className="text-sm font-semibold text-white">Cost Breakdown</p>
+                    <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+                      <p>Pickup road: ${costBreakdown.pickup_road_cost}</p>
+                      <p>Air linehaul: ${costBreakdown.air_linehaul_cost}</p>
+                      <p>Origin handling: ${costBreakdown.origin_airport_handling}</p>
+                      <p>Destination handling: ${costBreakdown.destination_airport_handling}</p>
+                      <p>Security fee: ${costBreakdown.security_fee}</p>
+                      <p>Fuel surcharge: ${costBreakdown.fuel_surcharge}</p>
+                      <p>Risk surcharge: ${costBreakdown.risk_surcharge}</p>
+                      <p>Insurance: ${costBreakdown.insurance_cost}</p>
+                      <p>Special handling: ${costBreakdown.special_handling}</p>
+                      <p>Final delivery: ${costBreakdown.final_delivery_cost}</p>
+                    </div>
+                    <p className="mt-3 text-sm font-semibold text-white">
+                      Total estimated cost: ${costBreakdown.total_estimated_cost_usd}
+                    </p>
+                  </div>
+                )}
+
+                {timeBreakdown && (
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                    <p className="text-sm font-semibold text-white">Time Breakdown</p>
+                    <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+                      <p>Pickup road: {timeBreakdown.pickup_road_time} h</p>
+                      <p>Origin processing: {timeBreakdown.airport_processing_time_origin} h</p>
+                      <p>Air flight: {timeBreakdown.air_flight_time} h</p>
+                      <p>Transfer: {timeBreakdown.transfer_time_if_any} h</p>
+                      <p>Destination processing: {timeBreakdown.destination_airport_processing_time} h</p>
+                      <p>Final delivery: {timeBreakdown.final_delivery_road_time} h</p>
+                      <p>Weather delay: {timeBreakdown.weather_delay} h</p>
+                    </div>
+                    <p className="mt-3 text-sm font-semibold text-white">
+                      Total estimated time: {timeBreakdown.total_time_hours} h
+                    </p>
+                  </div>
+                )}
+              </section>
+            )}
 
             {focusedOption?.weather_risk && (
               <section className="rounded-2xl border border-sky-400/20 bg-sky-400/10 p-4">
@@ -445,6 +673,55 @@ export default function RoutePanel({
                     ))}
                   </div>
                 )}
+              </section>
+            )}
+
+            {focusedOption?.mode === "air" && feasibility && (
+              <section className="space-y-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-white">Feasibility Warnings</p>
+                  <p className="mt-2 text-sm text-amber-100">
+                    {feasibility.feasible
+                      ? `Feasible with confidence score ${Math.round(feasibility.confidence_score)}.`
+                      : `Needs review with confidence score ${Math.round(feasibility.confidence_score)}.`}
+                  </p>
+                </div>
+                {feasibility.warnings.length > 0 && (
+                  <div className="space-y-2 text-sm text-amber-50/90">
+                    {feasibility.warnings.map((warning, warningIndex) => (
+                      <p
+                        key={`${selectedOptionKey}-air-warning-${warningIndex}`}
+                        className="rounded-xl border border-white/10 bg-slate-950/30 p-3"
+                      >
+                        {warning}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {feasibility.blocking_issues.length > 0 && (
+                  <div className="space-y-2 text-sm text-red-100">
+                    {feasibility.blocking_issues.map((issue, issueIndex) => (
+                      <p
+                        key={`${selectedOptionKey}-air-blocker-${issueIndex}`}
+                        className="rounded-xl border border-red-400/20 bg-red-400/10 p-3"
+                      >
+                        {issue}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {focusedOption?.mode === "air" && (
+              <section className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
+                <p className="text-sm font-semibold text-white">Final Recommendation</p>
+                <p className="mt-2 text-sm text-emerald-50/90">
+                  {focusedOption.recommendation_reason}
+                </p>
+                <p className="mt-3 text-xs text-emerald-50/80">
+                  Estimated freight model for shipment planning and simulation.
+                </p>
               </section>
             )}
 

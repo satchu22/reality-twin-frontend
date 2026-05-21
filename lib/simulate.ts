@@ -24,14 +24,26 @@ export type SimulationRequest = {
   destination_latitude?: number;
   destination_longitude?: number;
   cargo_type?: string;
+  commodity_type?: string;
   goods_description?: string;
   shipment_weight_kg?: number;
   shipment_volume_cbm?: number;
   shipment_units?: number;
+  weight_kg?: number;
+  volume_cbm?: number;
+  pieces?: number;
+  declared_value_usd?: number;
   pallet_count?: number;
   hazardous_material?: boolean;
   cold_chain_required?: boolean;
-  priority?: "low" | "standard" | "high" | "critical";
+  temperature_controlled?: boolean;
+  fragile?: boolean;
+  hazardous?: boolean;
+  pickup_ready_time?: string;
+  delivery_deadline?: string;
+  service_level?: "standard" | "express" | "economy";
+  insurance_required?: boolean;
+  priority?: "cheapest" | "fastest" | "safest" | "balanced";
 };
 
 export type SimulationStep = {
@@ -106,23 +118,142 @@ export type SimulationOption = {
   selected_origin_airport_name?: string;
   selected_destination_airport?: string;
   selected_destination_airport_name?: string;
+  origin_airport?: {
+    code: string;
+    name: string;
+    lat: number;
+    lng: number;
+    type: string;
+    scheduled_service: boolean;
+  };
+  destination_airport?: {
+    code: string;
+    name: string;
+    lat: number;
+    lng: number;
+    type: string;
+    scheduled_service: boolean;
+  };
+  shipment?: {
+    commodity_type: string;
+    weight_kg: number;
+    volume_cbm: number;
+    pieces: number;
+    declared_value_usd: number;
+    priority: string;
+    temperature_controlled: boolean;
+    fragile: boolean;
+    hazardous: boolean;
+    pickup_ready_time?: string | null;
+    delivery_deadline?: string | null;
+    service_level: string;
+    insurance_required: boolean;
+    goods_description: string;
+    pallet_count: number;
+  };
+  airline?: string;
   carrier?: string;
   carrier_codes?: string[];
   route_possibility?: string;
   air_route_validation?: string;
+  route_validation?: {
+    source: "openflights" | "estimated";
+    direct_route_known: boolean;
+    possible_airlines: string[];
+    stops: number;
+  };
+  air_freight_cost_breakdown?: {
+    pickup_road_cost: number;
+    air_linehaul_cost: number;
+    origin_airport_handling: number;
+    destination_airport_handling: number;
+    security_fee: number;
+    fuel_surcharge: number;
+    risk_surcharge: number;
+    insurance_cost: number;
+    special_handling: number;
+    final_delivery_cost: number;
+    total_estimated_cost_usd: number;
+  };
+  cost_breakdown?: {
+    pickup_road_cost: number;
+    air_linehaul_cost: number;
+    origin_airport_handling: number;
+    destination_airport_handling: number;
+    security_fee: number;
+    fuel_surcharge: number;
+    risk_surcharge: number;
+    insurance_cost: number;
+    special_handling: number;
+    final_delivery_cost: number;
+    total_estimated_cost_usd: number;
+  };
+  chargeable_weight?: {
+    actual_weight_kg: number;
+    volume_cbm: number;
+    dimensional_weight_kg: number;
+    chargeable_weight_kg: number;
+    calculation_note?: string;
+  };
+  air_time_breakdown?: {
+    pickup_road_time: number;
+    airport_processing_time_origin: number;
+    air_flight_time: number;
+    transfer_time_if_any: number;
+    destination_airport_processing_time: number;
+    final_delivery_road_time: number;
+    weather_delay: number;
+    total_time_hours: number;
+  };
+  air_feasibility?: {
+    feasible: boolean;
+    warnings: string[];
+    blocking_issues: string[];
+    confidence_score: number;
+  };
+  feasibility?: {
+    feasible: boolean;
+    warnings: string[];
+    blocking_issues: string[];
+    confidence_score: number;
+  };
+  confidence_score?: number;
+  live_airline_market_signal?: {
+    source: "amadeus" | "estimated";
+    live_pricing_available: boolean;
+    message: string;
+    departure_date?: string;
+    offers: Array<{
+      carrier_code: string;
+      carrier_name: string;
+      price: number | null;
+      currency: string;
+      duration: string;
+      departure_at?: string;
+      arrival_at?: string;
+      stops: number;
+    }>;
+  };
   airport_handling_cost?: number;
   stops?: number | null;
   shipment_assumptions?: {
-    cargo_type: string;
+    commodity_type: string;
     goods_description: string;
     priority: string;
-    shipment_weight_kg: number;
-    shipment_volume_cbm: number;
-    shipment_units: number;
+    weight_kg: number;
+    volume_cbm: number;
+    pieces: number;
+    declared_value_usd: number;
     pallet_count: number;
-    hazardous_material: boolean;
-    cold_chain_required: boolean;
+    temperature_controlled: boolean;
+    fragile: boolean;
+    hazardous: boolean;
+    service_level: string;
+    insurance_required: boolean;
+    actual_weight_kg: number;
+    dimensional_weight_kg: number;
     chargeable_weight_kg: number;
+    calculation_note?: string;
     capacity_utilization_estimate: number;
   };
   recommendation_reason: string;
