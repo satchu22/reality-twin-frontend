@@ -43,6 +43,9 @@ venv/
 .venv/
 **/venv/
 **/.venv/
+backend/app/data/cache/*.csv
+backend/app/data/cache/*.dat
+!backend/app/data/cache/.gitkeep
 
 # debug
 npm-debug.log*

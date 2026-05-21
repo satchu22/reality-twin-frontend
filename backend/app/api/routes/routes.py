@@ -16,6 +16,7 @@ from ...services.route_service import (
     get_overview,
     upload_shipments_from_csv,
 )
+from ...services.airport_data_service import find_nearest_airports_payload
 
 router = APIRouter(tags=["routes"])
 
@@ -70,6 +71,28 @@ def overview(db: Session = Depends(get_db)):
     """Return dashboard overview metrics."""
 
     return get_overview(db)
+
+
+@router.get("/airports/nearest")
+def nearest_airports(
+    lat: float,
+    lng: float,
+    limit: int = 5,
+    max_distance_km: float | None = None,
+):
+    """Return nearest suitable airports from the worldwide airport dataset."""
+
+    return {
+        "lat": lat,
+        "lng": lng,
+        "limit": limit,
+        "airports": find_nearest_airports_payload(
+            lat,
+            lng,
+            limit=limit,
+            max_distance_km=max_distance_km,
+        ),
+    }
 
 
 @router.get("/batches", response_model=list[BatchResponse])

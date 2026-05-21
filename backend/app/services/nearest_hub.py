@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import math
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+
+from .airport_data_service import (
+    AirportRecord,
+    find_nearest_airport_records,
+    load_airport_records,
+)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
@@ -20,6 +25,7 @@ class Hub:
     lng: float
     country: str
     coast: str | None = None
+    distance_km: float | None = None
 
 
 def haversine_distance_km(
@@ -59,44 +65,26 @@ def _merge_hub_collections(*collections: tuple[Hub, ...]) -> tuple[Hub, ...]:
     return tuple(merged.values())
 
 
+def _airport_record_to_hub(
+    record: AirportRecord,
+    *,
+    distance_km: float | None = None,
+) -> Hub:
+    code = record.iata or record.icao or record.ident or record.id
+    country = record.iso_country or "Unknown"
+    return Hub(
+        code=code,
+        name=record.name,
+        lat=record.lat,
+        lng=record.lng,
+        country=country,
+        distance_km=distance_km,
+    )
+
+
 @lru_cache(maxsize=1)
 def load_airports() -> tuple[Hub, ...]:
-    csv_path = DATA_DIR / "airports_openflights.csv"
-    csv_airports: list[Hub] = []
-    if csv_path.exists():
-        with csv_path.open(encoding="utf-8", newline="") as handle:
-            reader = csv.DictReader(handle)
-            for row in reader:
-                if row.get("type") != "airport":
-                    continue
-
-                code = (row.get("iata") or "").strip().upper()
-                if not code or code == "\\N":
-                    continue
-
-                try:
-                    lat = float(row["latitude"])
-                    lng = float(row["longitude"])
-                except (TypeError, ValueError):
-                    continue
-
-                name = (row.get("name") or code).strip()
-                country = (row.get("country") or "Unknown").strip()
-                csv_airports.append(
-                    Hub(
-                        code=code,
-                        name=name,
-                        lat=lat,
-                        lng=lng,
-                        country=country,
-                    )
-                )
-
-    merged_airports = _merge_hub_collections(_load_hubs("airports.json"), tuple(csv_airports))
-    if merged_airports:
-        return merged_airports
-
-    return _load_hubs("airports.json")
+    return tuple(_airport_record_to_hub(record) for record in load_airport_records())
 
 
 @lru_cache(maxsize=1)
@@ -153,23 +141,25 @@ def find_nearest_hubs(
 def find_nearest_airports(
     lat: float,
     lng: float,
-    limit: int = 3,
+    limit: int = 5,
     *,
     max_distance_km: float | None = None,
     fallback_distance_km: float | None = None,
     preferred_country: str | None = None,
     min_results: int = 2,
 ) -> list[Hub]:
-    return find_nearest_hubs(
-        lat,
-        lng,
-        load_airports(),
-        limit=limit,
-        max_distance_km=max_distance_km,
-        fallback_distance_km=fallback_distance_km,
-        preferred_country=preferred_country,
-        min_results=min_results,
-    )
+    return [
+        _airport_record_to_hub(result.airport, distance_km=result.distance_km)
+        for result in find_nearest_airport_records(
+            lat,
+            lng,
+            limit=limit,
+            max_distance_km=max_distance_km,
+            fallback_distance_km=fallback_distance_km,
+            preferred_country=preferred_country,
+            min_results=min_results,
+        )
+    ]
 
 
 def find_nearest_seaports(
